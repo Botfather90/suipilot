@@ -1,0 +1,19 @@
+{
+  "name": "@suipilot/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for SuiPilot — AI DeFi Execution Protocol on Sui",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT"
+}

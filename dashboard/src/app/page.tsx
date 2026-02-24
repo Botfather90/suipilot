@@ -1,328 +1,425 @@
 'use client';
-import { useState } from 'react';
-import { AreaChart, Area, BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Cell, PieChart, Pie } from 'recharts';
 
-// Mock protocol data
-const PROTOCOL_STATS = {
-  totalVolume: '$4.2M',
-  totalIntents: '12,847',
-  activeVaults: 6,
-  activeAgents: 23,
-  avgSlippage: '0.12%',
-  successRate: '98.7%',
-};
-
-const VOLUME_DATA = [
-  { day: 'Mon', volume: 320000, intents: 1240 },
-  { day: 'Tue', volume: 480000, intents: 1890 },
-  { day: 'Wed', volume: 410000, intents: 1650 },
-  { day: 'Thu', volume: 590000, intents: 2310 },
-  { day: 'Fri', volume: 720000, intents: 2780 },
-  { day: 'Sat', volume: 380000, intents: 1520 },
-  { day: 'Sun', volume: 290000, intents: 1120 },
-];
-
-const PROTOCOL_BREAKDOWN = [
-  { name: 'Cetus', value: 42, fill: '#6366f1' },
-  { name: 'Turbos', value: 28, fill: '#3b82f6' },
-  { name: 'DeepBook', value: 18, fill: '#14b8a6' },
-  { name: 'Other', value: 12, fill: '#71717a' },
-];
-
-const VAULTS = [
-  { name: 'SUI-USDC Yield', apy: '12.4%', tvl: '$1.2M', strategy: 'LP + Stake', status: 'active', shares: 4820, depositors: 142 },
-  { name: 'USDC Stable', apy: '5.8%', tvl: '$890K', strategy: 'Lending', status: 'active', shares: 3200, depositors: 89 },
-  { name: 'SUI Staking', apy: '8.2%', tvl: '$2.1M', strategy: 'Validator', status: 'active', shares: 7600, depositors: 213 },
-  { name: 'wETH-SUI LP', apy: '18.7%', tvl: '$450K', strategy: 'Concentrated LP', status: 'active', shares: 1890, depositors: 67 },
-];
-
-const RECENT_INTENTS = [
-  { id: '0x8f2a...e4c1', type: 'Swap', pair: 'SUI -> USDC', amount: '2,500 SUI', status: 'executed', protocol: 'Cetus', slippage: '0.08%', time: '2m ago' },
-  { id: '0x3b7d...a891', type: 'Swap', pair: 'USDC -> wETH', amount: '5,000 USDC', status: 'executed', protocol: 'Turbos', slippage: '0.15%', time: '4m ago' },
-  { id: '0xc1e9...7f23', type: 'LP Add', pair: 'SUI-USDC', amount: '1,200 SUI', status: 'pending', protocol: 'DeepBook', slippage: '-', time: '1m ago' },
-  { id: '0x5a4c...b2d8', type: 'Swap', pair: 'SUI -> USDT', amount: '800 SUI', status: 'failed', protocol: 'Cetus', slippage: '-', time: '6m ago' },
-  { id: '0x9f1b...c3a7', type: 'Swap', pair: 'wBTC -> SUI', amount: '0.05 wBTC', status: 'executed', protocol: 'Turbos', slippage: '0.22%', time: '8m ago' },
-];
-
-const GUARD_RAILS = [
-  { id: '0xa2b1...4f8e', owner: '0x7c3a...e291', agent: '0xbot1...8a2f', maxSlippage: '1%', epochLimit: '50K SUI', spent: '12.4K', status: 'active' },
-  { id: '0xd8c2...1a3b', owner: '0x5e91...b472', agent: '0xbot2...c7e1', maxSlippage: '0.5%', epochLimit: '100K SUI', spent: '78.2K', status: 'active' },
-  { id: '0xf4a7...9c2d', owner: '0x3b28...f914', agent: '0xbot3...a9d2', maxSlippage: '2%', epochLimit: '10K SUI', spent: '9.8K', status: 'near-limit' },
-];
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useCurrentAccount, useDisconnectWallet, ConnectModal, useSuiClient } from '@mysten/dapp-kit';
 
 type Tab = 'overview' | 'vaults' | 'intents' | 'guards';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'vaults', label: 'Vaults' },
+  { id: 'intents', label: 'Intents' },
+  { id: 'guards', label: 'Guard Rails' },
+];
+
+// Cursor follower
+function Cursor() {
+  const dotRef = useRef<HTMLDivElement>(null);
+  const ringRef = useRef<HTMLDivElement>(null);
+  const [hovering, setHovering] = useState(false);
+
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (dotRef.current) { dotRef.current.style.left = `${e.clientX - 4}px`; dotRef.current.style.top = `${e.clientY - 4}px`; }
+      if (ringRef.current) { ringRef.current.style.left = `${e.clientX - 18}px`; ringRef.current.style.top = `${e.clientY - 18}px`; }
+    };
+    const over = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('button, a, .interactive')) setHovering(true);
+    };
+    const out = () => setHovering(false);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseover', over);
+    window.addEventListener('mouseout', out);
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseover', over); window.removeEventListener('mouseout', out); };
+  }, []);
+
+  return <>
+    <div ref={dotRef} className="cursor-dot" />
+    <div ref={ringRef} className={`cursor-ring ${hovering ? 'hover' : ''}`} />
+  </>;
+}
+
+// Glow-follow card
+function GlowCard({ children, className = '', style = {}, delay = 0 }: { children: React.ReactNode; className?: string; style?: React.CSSProperties; delay?: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const glowRef = useRef<HTMLDivElement>(null);
+
+  const handleMove = useCallback((e: React.MouseEvent) => {
+    if (!ref.current || !glowRef.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    glowRef.current.style.left = `${e.clientX - rect.left}px`;
+    glowRef.current.style.top = `${e.clientY - rect.top}px`;
+  }, []);
+
+  return (
+    <motion.div
+      ref={ref}
+      className={`neo glow-box interactive ${className}`}
+      style={style}
+      onMouseMove={handleMove}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
+      whileHover={{ scale: 1.01 }}
+      whileTap={{ scale: 0.99 }}
+    >
+      <div ref={glowRef} className="glow-follow" />
+      {children}
+    </motion.div>
+  );
+}
+
+// Format address
+function shortAddr(addr: string) { return addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : ''; }
+function formatSui(mist: bigint) { return (Number(mist) / 1_000_000_000).toFixed(4); }
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>('overview');
-  const TABS: { id: Tab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'vaults', label: 'Vaults' },
-    { id: 'intents', label: 'Intents' },
-    { id: 'guards', label: 'Guard Rails' },
-  ];
+  const [connectOpen, setConnectOpen] = useState(false);
+  const account = useCurrentAccount();
+  const { mutate: disconnect } = useDisconnectWallet();
+  const client = useSuiClient();
+
+  // On-chain data
+  const [balance, setBalance] = useState<bigint>(0n);
+  const [ownedObjects, setOwnedObjects] = useState<number>(0);
+  const [txHistory, setTxHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch wallet data
+  useEffect(() => {
+    if (!account?.address) { setBalance(0n); setOwnedObjects(0); setTxHistory([]); return; }
+    setLoading(true);
+
+    Promise.all([
+      client.getBalance({ owner: account.address }),
+      client.getOwnedObjects({ owner: account.address, limit: 50 }),
+      client.queryTransactionBlocks({ filter: { FromAddress: account.address }, limit: 10, options: { showEffects: true, showInput: true } }),
+    ]).then(([bal, objs, txs]) => {
+      setBalance(BigInt(bal.totalBalance));
+      setOwnedObjects(objs.data.length);
+      setTxHistory(txs.data.map(tx => ({
+        digest: tx.digest,
+        status: tx.effects?.status?.status || 'unknown',
+        gas: tx.effects?.gasUsed ? BigInt(tx.effects.gasUsed.computationCost) + BigInt(tx.effects.gasUsed.storageCost) : 0n,
+        timestamp: tx.timestampMs ? new Date(Number(tx.timestampMs)).toLocaleString() : '',
+        kind: tx.transaction?.data?.transaction?.kind || 'Unknown',
+      })));
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [account?.address, client]);
 
   return (
-    <div style={{ minHeight: '100vh', padding: '20px 32px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color: '#fff' }}>S</div>
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px' }}>SuiPilot</div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.5px' }}>AI DEFI EXECUTION PROTOCOL</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="badge badge-green" style={{ animation: 'pulse 2s infinite' }}>TESTNET</span>
-          <button className="btn btn-primary" style={{ padding: '8px 16px', fontSize: 12 }}>Connect Wallet</button>
-        </div>
-      </div>
+    <div style={{ minHeight: '100vh', padding: '80px 40px 40px', position: 'relative' }}>
+      <Cursor />
+      <div className="grid-bg" />
 
-      {/* Tabs */}
-      <div className="card" style={{ display: 'inline-flex', gap: 0, padding: 4, marginBottom: 28 }}>
+      {/* Pill Navbar */}
+      <nav className="pill-nav">
+        <motion.div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 8 }}>
+          <motion.div
+            style={{ width: 28, height: 28, borderRadius: 14, background: 'var(--yellow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, color: '#000' }}
+            animate={{ rotate: [0, 360] }}
+            transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+          >S</motion.div>
+        </motion.div>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding: '8px 20px', fontSize: 13, fontWeight: tab === t.id ? 600 : 400,
-            color: tab === t.id ? '#fff' : 'var(--text-muted)',
-            background: tab === t.id ? 'var(--accent)' : 'transparent',
-            border: 'none', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-          }}>{t.label}</button>
+          <motion.button
+            key={t.id}
+            className={tab === t.id ? 'active' : ''}
+            onClick={() => setTab(t.id)}
+            whileTap={{ scale: 0.92 }}
+          >{t.label}</motion.button>
         ))}
-      </div>
+        <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
+        {account ? (
+          <motion.button onClick={() => disconnect()} whileTap={{ scale: 0.92 }} style={{ color: 'var(--yellow)', fontWeight: 600 }}>
+            {shortAddr(account.address)}
+          </motion.button>
+        ) : (
+          <ConnectModal
+            trigger={<motion.button whileTap={{ scale: 0.92 }} className="active" style={{ fontSize: 12 }}>Connect</motion.button>}
+            open={connectOpen}
+            onOpenChange={setConnectOpen}
+          />
+        )}
+      </nav>
 
-      {tab === 'overview' && (
-        <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
-          {/* Stats */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 14, marginBottom: 24 }}>
-            {[
-              { label: 'Total Volume', value: PROTOCOL_STATS.totalVolume, color: 'var(--accent)' },
-              { label: 'Intents Executed', value: PROTOCOL_STATS.totalIntents, color: 'var(--blue)' },
-              { label: 'Active Vaults', value: String(PROTOCOL_STATS.activeVaults), color: 'var(--teal)' },
-              { label: 'AI Agents', value: String(PROTOCOL_STATS.activeAgents), color: 'var(--green)' },
-              { label: 'Avg Slippage', value: PROTOCOL_STATS.avgSlippage, color: 'var(--amber)' },
-              { label: 'Success Rate', value: PROTOCOL_STATS.successRate, color: 'var(--green)' },
-            ].map(s => (
-              <div key={s.label} className="card glow" style={{ padding: 20 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>{s.label}</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-1px' }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
+      {/* Beam line */}
+      <motion.div className="beam-line" style={{ marginBottom: 32 }} />
 
-          {/* Charts Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
-            <div className="card glow" style={{ padding: 24 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Volume (7d)</div>
-              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 20 }}>Daily execution volume across all protocols</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={VOLUME_DATA}>
-                  <defs>
-                    <linearGradient id="vg" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2a" />
-                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#71717a' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#71717a' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                  <Tooltip contentStyle={{ background: '#111118', border: '1px solid #1e1e2a', borderRadius: 10, color: '#e4e4e7', fontSize: 12 }} formatter={(v: number) => [`$${(v/1000).toFixed(1)}K`, 'Volume']} />
-                  <Area type="monotone" dataKey="volume" stroke="#6366f1" strokeWidth={2} fill="url(#vg)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="card glow" style={{ padding: 24 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Protocol Split</div>
-              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 16 }}>DEX routing distribution</div>
-              <ResponsiveContainer width="100%" height={160}>
-                <PieChart>
-                  <Pie data={PROTOCOL_BREAKDOWN} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
-                    {PROTOCOL_BREAKDOWN.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                  </Pie>
-                  <Tooltip contentStyle={{ background: '#111118', border: '1px solid #1e1e2a', borderRadius: 10, color: '#e4e4e7', fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                {PROTOCOL_BREAKDOWN.map(p => (
-                  <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.fill }} /> {p.name}
-                    </span>
-                    <span className="mono" style={{ fontSize: 12, color: 'var(--text)' }}>{p.value}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Recent Intents */}
-          <div className="card glow" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Recent Intents</span>
-              <button onClick={() => setTab('intents')} className="btn" style={{ padding: '6px 14px', fontSize: 11 }}>View All</button>
-            </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Intent', 'Type', 'Pair', 'Amount', 'Protocol', 'Slippage', 'Status', 'Time'].map(h => (
-                  <th key={h} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {RECENT_INTENTS.map(i => {
-                  const sc = i.status === 'executed' ? 'badge-green' : i.status === 'pending' ? 'badge-amber' : 'badge-red';
-                  return (
-                    <tr key={i.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--accent-bright)' }}>{i.id}</td>
-                      <td style={{ padding: '12px 16px', fontSize: 12 }}>{i.type}</td>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>{i.pair}</td>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>{i.amount}</td>
-                      <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-muted)' }}>{i.protocol}</td>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: i.slippage === '-' ? 'var(--text-dim)' : 'var(--green)' }}>{i.slippage}</td>
-                      <td style={{ padding: '12px 16px' }}><span className={`badge ${sc}`}>{i.status}</span></td>
-                      <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-dim)' }}>{i.time}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {tab === 'vaults' && (
-        <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            {VAULTS.map(v => (
-              <div key={v.name} className="card glow" style={{ padding: 24 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>{v.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{v.strategy}</div>
-                  </div>
-                  <span className="badge badge-green">{v.status}</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+      <AnimatePresence mode="wait">
+        {tab === 'overview' && (
+          <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+            {!account ? (
+              /* Not connected state */
+              <motion.div style={{ textAlign: 'center', paddingTop: 80 }} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }}>
+                <motion.div
+                  style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-3px', marginBottom: 8, background: 'linear-gradient(135deg, var(--yellow), #fff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
+                  animate={{ opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 3, repeat: Infinity }}
+                >SuiPilot</motion.div>
+                <motion.div style={{ fontSize: 18, color: 'var(--text-muted)', maxWidth: 500, margin: '0 auto 40px', lineHeight: 1.7 }}
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
+                  AI DeFi Execution Protocol. Programmable guard rails. Typed intents. On-chain audit trails. Connect your wallet to begin.
+                </motion.div>
+                <ConnectModal
+                  trigger={
+                    <motion.button className="btn-neo btn-primary" style={{ padding: '16px 40px', fontSize: 16, borderRadius: 50 }}
+                      whileHover={{ scale: 1.05, boxShadow: '0 0 40px rgba(245,197,24,0.3)' }}
+                      whileTap={{ scale: 0.95 }}
+                    >Connect Wallet</motion.button>
+                  }
+                  open={connectOpen}
+                  onOpenChange={setConnectOpen}
+                />
+                <motion.div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, maxWidth: 700, margin: '60px auto 0' }}
+                  initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
                   {[
-                    { l: 'APY', v: v.apy, c: 'var(--green)' },
-                    { l: 'TVL', v: v.tvl, c: 'var(--accent-bright)' },
-                    { l: 'Shares', v: v.shares.toLocaleString(), c: 'var(--text)' },
-                    { l: 'Depositors', v: String(v.depositors), c: 'var(--text)' },
-                  ].map(s => (
-                    <div key={s.l}>
-                      <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>{s.l}</div>
-                      <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: s.c }}>{s.v}</div>
-                    </div>
+                    { title: 'Guard Rails', desc: 'Define constraints: max slippage, spending limits, protocol whitelists. Enforced at the contract level.' },
+                    { title: 'Typed Intents', desc: 'SwapIntent, LiquidityIntent as on-chain objects. Full lifecycle. Atomic execution.' },
+                    { title: 'Audit Trail', desc: 'Every action logged on-chain. Owned objects you can verify independently.' },
+                  ].map((f, i) => (
+                    <GlowCard key={f.title} style={{ padding: 24 }} delay={0.7 + i * 0.1}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--yellow)', marginBottom: 8 }}>{f.title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>{f.desc}</div>
+                    </GlowCard>
+                  ))}
+                </motion.div>
+              </motion.div>
+            ) : (
+              /* Connected: real wallet data */
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+                  {[
+                    { label: 'WALLET', value: shortAddr(account.address), color: 'var(--yellow)' },
+                    { label: 'SUI BALANCE', value: loading ? '...' : `${formatSui(balance)} SUI`, color: 'var(--yellow)' },
+                    { label: 'OWNED OBJECTS', value: loading ? '...' : String(ownedObjects), color: 'var(--text)' },
+                    { label: 'TRANSACTIONS', value: loading ? '...' : String(txHistory.length), color: 'var(--text)' },
+                  ].map((s, i) => (
+                    <GlowCard key={s.label} style={{ padding: 22 }} delay={i * 0.08}>
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, letterSpacing: '1px', marginBottom: 10 }}>{s.label}</div>
+                      <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
+                    </GlowCard>
                   ))}
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-primary" style={{ flex: 1, padding: '8px', fontSize: 12 }}>Deposit</button>
-                  <button className="btn" style={{ flex: 1, padding: '8px', fontSize: 12 }}>Withdraw</button>
+
+                {/* Transaction History */}
+                <GlowCard style={{ overflow: 'hidden', marginBottom: 20 }} delay={0.3}>
+                  <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>Recent Transactions</span>
+                    <span className="badge badge-yellow" style={{ animation: 'pulse 2s infinite' }}>LIVE</span>
+                  </div>
+                  {txHistory.length === 0 && !loading ? (
+                    <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>
+                      No transactions found. Deploy SuiPilot contracts to get started.
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
+                        {['Digest', 'Kind', 'Status', 'Gas', 'Time'].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px' }}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {txHistory.map((tx, i) => (
+                          <motion.tr key={tx.digest} style={{ borderBottom: '1px solid var(--border)' }}
+                            initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 + i * 0.05 }}>
+                            <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--yellow)' }}>
+                              <a href={`https://suiscan.xyz/testnet/tx/${tx.digest}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--yellow)', textDecoration: 'none' }}>
+                                {tx.digest.slice(0, 10)}...{tx.digest.slice(-6)}
+                              </a>
+                            </td>
+                            <td style={{ padding: '12px 16px', fontSize: 12 }}>{tx.kind}</td>
+                            <td style={{ padding: '12px 16px' }}>
+                              <span className={`badge ${tx.status === 'success' ? 'badge-green' : 'badge-red'}`}>{tx.status}</span>
+                            </td>
+                            <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+                              {tx.gas ? formatSui(tx.gas) : '-'}
+                            </td>
+                            <td style={{ padding: '12px 16px', fontSize: 11, color: 'var(--text-dim)' }}>{tx.timestamp}</td>
+                          </motion.tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </GlowCard>
+
+                {/* Protocol Info */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <GlowCard style={{ padding: 24 }} delay={0.5}>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Protocol Status</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {[
+                        { label: 'Network', value: 'Sui Testnet', status: true },
+                        { label: 'Contracts', value: 'Not Deployed', status: false },
+                        { label: 'Guard Rails', value: 'Deploy to create', status: false },
+                        { label: 'Active Vaults', value: 'Deploy to create', status: false },
+                      ].map(item => (
+                        <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{item.label}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className="mono" style={{ fontSize: 12 }}>{item.value}</span>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: item.status ? 'var(--green)' : 'var(--text-dim)' }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </GlowCard>
+
+                  <GlowCard style={{ padding: 24 }} delay={0.6}>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Quick Actions</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <motion.button className="btn-neo btn-primary" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        Deploy Contracts
+                      </motion.button>
+                      <motion.button className="btn-neo" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        Create Guard Rail
+                      </motion.button>
+                      <motion.button className="btn-neo" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        Create Vault
+                      </motion.button>
+                      <motion.button className="btn-neo" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        Submit Intent
+                      </motion.button>
+                    </div>
+                  </GlowCard>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            )}
+          </motion.div>
+        )}
 
-      {tab === 'intents' && (
-        <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
-          <div className="card glow" style={{ padding: 24, marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Intent Volume</div>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={VOLUME_DATA} barSize={32}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2a" />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#71717a' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#71717a' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#111118', border: '1px solid #1e1e2a', borderRadius: 10, color: '#e4e4e7', fontSize: 12 }} />
-                <Bar dataKey="intents" fill="#6366f1" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="card glow" style={{ overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Intent ID', 'Type', 'Pair', 'Amount', 'Protocol', 'Slippage', 'Status', 'Time'].map(h => (
-                  <th key={h} style={{ textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase' }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {[...RECENT_INTENTS, ...RECENT_INTENTS].map((i, idx) => {
-                  const sc = i.status === 'executed' ? 'badge-green' : i.status === 'pending' ? 'badge-amber' : 'badge-red';
-                  return (
-                    <tr key={`${i.id}-${idx}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--accent-bright)' }}>{i.id}</td>
-                      <td style={{ padding: '12px 16px', fontSize: 12 }}>{i.type}</td>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>{i.pair}</td>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>{i.amount}</td>
-                      <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-muted)' }}>{i.protocol}</td>
-                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: i.slippage === '-' ? 'var(--text-dim)' : 'var(--green)' }}>{i.slippage}</td>
-                      <td style={{ padding: '12px 16px' }}><span className={`badge ${sc}`}>{i.status}</span></td>
-                      <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-dim)' }}>{i.time}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {tab === 'guards' && (
-        <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <div>
-              <div style={{ fontSize: 17, fontWeight: 700 }}>Guard Rails</div>
-              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>User-defined constraints on AI agent behavior</div>
-            </div>
-            <button className="btn btn-primary" style={{ fontSize: 12 }}>+ Create Guard Rail</button>
-          </div>
-          {GUARD_RAILS.map(g => {
-            const pct = parseFloat(g.spent.replace('K', '')) / parseFloat(g.epochLimit.replace('K SUI', '')) * 100;
-            const barColor = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--amber)' : 'var(--green)';
-            return (
-              <div key={g.id} className="card glow" style={{ padding: 22, marginBottom: 12 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: 16, alignItems: 'center' }}>
+        {tab === 'vaults' && (
+          <motion.div key="vaults" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {!account ? (
+              <motion.div style={{ textAlign: 'center', paddingTop: 100 }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 12 }}>Vaults</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 24 }}>Connect your wallet to view and manage AI-managed vaults.</div>
+                <ConnectModal
+                  trigger={<motion.button className="btn-neo btn-primary" style={{ padding: '14px 32px', borderRadius: 50 }} whileTap={{ scale: 0.95 }}>Connect Wallet</motion.button>}
+                  open={connectOpen} onOpenChange={setConnectOpen}
+                />
+              </motion.div>
+            ) : (
+              <div>
+                <motion.div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                   <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Guard Rail</div>
-                    <div className="mono" style={{ fontSize: 13, color: 'var(--accent-bright)' }}>{g.id}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800 }}>Vaults</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>Deploy contracts first, then create vaults</div>
                   </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Max Slippage</div>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 700 }}>{g.maxSlippage}</div>
+                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }}>+ Create Vault</motion.button>
+                </motion.div>
+                <GlowCard style={{ padding: 48, textAlign: 'center' }}>
+                  <div style={{ fontSize: 48, marginBottom: 16, filter: 'grayscale(1) opacity(0.3)' }}>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
                   </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Epoch Limit</div>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 700 }}>{g.epochLimit}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No Vaults Found</div>
+                  <div style={{ color: 'var(--text-dim)', fontSize: 13, maxWidth: 400, margin: '0 auto' }}>
+                    Deploy the SuiPilot Move contracts to Sui testnet first. Then create vaults with custom strategies, fee configurations, and deposit tokens.
                   </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Spent</span>
-                      <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.spent} / {g.epochLimit}</span>
-                    </div>
-                    <div style={{ height: 6, borderRadius: 3, background: '#1e1e2a', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', borderRadius: 3, background: barColor, width: `${Math.min(pct, 100)}%`, transition: 'width 0.5s' }} />
-                    </div>
-                  </div>
-                  <span className={`badge ${g.status === 'active' ? 'badge-green' : 'badge-amber'}`}>{g.status}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 20, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-                  <div><span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Owner: </span><span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.owner}</span></div>
-                  <div><span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Agent: </span><span className="mono" style={{ fontSize: 11, color: 'var(--accent-bright)' }}>{g.agent}</span></div>
-                </div>
+                </GlowCard>
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </motion.div>
+        )}
+
+        {tab === 'intents' && (
+          <motion.div key="intents" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {!account ? (
+              <motion.div style={{ textAlign: 'center', paddingTop: 100 }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 12 }}>Intents</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 24 }}>Connect to view swap and liquidity intents.</div>
+                <ConnectModal
+                  trigger={<motion.button className="btn-neo btn-primary" style={{ padding: '14px 32px', borderRadius: 50 }} whileTap={{ scale: 0.95 }}>Connect Wallet</motion.button>}
+                  open={connectOpen} onOpenChange={setConnectOpen}
+                />
+              </motion.div>
+            ) : (
+              <div>
+                <motion.div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <div>
+                    <div style={{ fontSize: 24, fontWeight: 800 }}>Intents</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>Swap and liquidity intents validated against guard rails</div>
+                  </div>
+                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }}>+ New Intent</motion.button>
+                </motion.div>
+                <GlowCard style={{ padding: 48, textAlign: 'center' }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="1.5" style={{ opacity: 0.3 }}>
+                      <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
+                      <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+                    </svg>
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No Intents Yet</div>
+                  <div style={{ color: 'var(--text-dim)', fontSize: 13, maxWidth: 400, margin: '0 auto' }}>
+                    Create a guard rail first, then submit swap or liquidity intents. Each intent is validated against your constraints before execution.
+                  </div>
+                </GlowCard>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {tab === 'guards' && (
+          <motion.div key="guards" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {!account ? (
+              <motion.div style={{ textAlign: 'center', paddingTop: 100 }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 12 }}>Guard Rails</div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 24 }}>Connect to manage your AI agent constraints.</div>
+                <ConnectModal
+                  trigger={<motion.button className="btn-neo btn-primary" style={{ padding: '14px 32px', borderRadius: 50 }} whileTap={{ scale: 0.95 }}>Connect Wallet</motion.button>}
+                  open={connectOpen} onOpenChange={setConnectOpen}
+                />
+              </motion.div>
+            ) : (
+              <div>
+                <motion.div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <div>
+                    <div style={{ fontSize: 24, fontWeight: 800 }}>Guard Rails</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>Define what your AI agent can and cannot do</div>
+                  </div>
+                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }}>+ Create Guard Rail</motion.button>
+                </motion.div>
+                <GlowCard style={{ padding: 48, textAlign: 'center' }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="1.5" style={{ opacity: 0.3 }}>
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No Guard Rails</div>
+                  <div style={{ color: 'var(--text-dim)', fontSize: 13, maxWidth: 440, margin: '0 auto 20px' }}>
+                    Guard rails are on-chain constraints that limit what your AI agent can do. Set max slippage, spending limits per epoch, protocol whitelists, and coin type restrictions.
+                  </div>
+                  <motion.button className="btn-neo btn-primary" style={{ padding: '14px 32px', borderRadius: 50, fontSize: 14 }}
+                    whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(245,197,24,0.25)' }}
+                    whileTap={{ scale: 0.95 }}>
+                    Create Your First Guard Rail
+                  </motion.button>
+                </GlowCard>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Footer */}
-      <div style={{ marginTop: 40, paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', paddingBottom: 20 }}>
-        <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>SuiPilot v0.1.0 -- Sui Testnet</div>
-        <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text-muted)' }}>
-          <a href="https://github.com/Botfather90/suipilot" target="_blank" style={{ color: 'var(--accent-bright)', textDecoration: 'none' }}>GitHub</a>
-          <span>Docs</span>
-          <span>SDK</span>
+      <motion.div style={{ marginTop: 60, paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', paddingBottom: 20 }}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)' }}>SuiPilot v0.1.0 // Sui Testnet</div>
+        <div style={{ display: 'flex', gap: 20, fontSize: 12 }}>
+          <a href="https://github.com/Botfather90/suipilot" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--yellow)', textDecoration: 'none' }}>GitHub</a>
+          <span style={{ color: 'var(--text-dim)' }}>Docs</span>
+          <span style={{ color: 'var(--text-dim)' }}>SDK</span>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useCurrentAccount, useDisconnectWallet, ConnectModal, useSuiClient } from '@mysten/dapp-kit';
 import GuardRailForm from '@/components/GuardRailForm';
 import IntentForm from '@/components/IntentForm';
+import VaultForm from '@/components/VaultForm';
 
 type Tab = 'overview' | 'vaults' | 'intents' | 'guards';
 const TABS: { id: Tab; label: string }[] = [
@@ -92,6 +93,8 @@ export default function Home() {
   const [showIntentForm, setShowIntentForm] = useState(false);
   const [createdGuards, setCreatedGuards] = useState<any[]>([]);
   const [createdIntents, setCreatedIntents] = useState<any[]>([]);
+  const [showVaultForm, setShowVaultForm] = useState(false);
+  const [createdVaults, setCreatedVaults] = useState<any[]>([]);
 
   // Fetch wallet data
   useEffect(() => {
@@ -281,15 +284,18 @@ export default function Home() {
                         Deploy Contracts
                       </motion.button>
                       <motion.button className="btn-neo" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={() => setShowGuardForm(true)}>
                         Create Guard Rail
                       </motion.button>
                       <motion.button className="btn-neo" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={() => setShowVaultForm(true)}>
                         Create Vault
                       </motion.button>
                       <motion.button className="btn-neo" style={{ width: '100%', padding: 14, fontSize: 13, borderRadius: 14 }}
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={() => setShowIntentForm(true)}>
                         Submit Intent
                       </motion.button>
                     </div>
@@ -319,17 +325,44 @@ export default function Home() {
                     <div style={{ fontSize: 24, fontWeight: 800 }}>Vaults</div>
                     <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>Deploy contracts first, then create vaults</div>
                   </div>
-                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }}>+ Create Vault</motion.button>
+                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }} onClick={() => setShowVaultForm(true)}>+ Create Vault</motion.button>
                 </motion.div>
+                {createdVaults.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    {createdVaults.map((v, i) => (
+                      <GlowCard key={i} style={{ padding: 22 }} delay={i * 0.05}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                          <span style={{ fontSize: 15, fontWeight: 700 }}>{v.name || `Vault #${i + 1}`}</span>
+                          <span className="badge badge-green" style={{ fontSize: 10, padding: '2px 8px' }}>LIVE</span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>STRATEGY</div><div style={{ fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>{v.strategy}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>DEPOSIT TOKEN</div><div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--yellow)' }}>{v.depositCoin}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>TVL</div><div className="mono" style={{ fontSize: 13, fontWeight: 600 }}>0 {v.depositCoin}</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>FEE</div><div className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{(v.feeBps / 100).toFixed(1)}%</div></div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <motion.button className="btn-neo" style={{ flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontFamily: 'inherit' }} whileTap={{ scale: 0.96 }}>Deposit</motion.button>
+                          <motion.button className="btn-neo" style={{ flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontFamily: 'inherit' }} whileTap={{ scale: 0.96 }}>Withdraw</motion.button>
+                        </div>
+                      </GlowCard>
+                    ))}
+                  </div>
+                ) : (
                 <GlowCard style={{ padding: 48, textAlign: 'center' }}>
                   <div style={{ fontSize: 48, marginBottom: 16, filter: 'grayscale(1) opacity(0.3)' }}>
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
                   </div>
                   <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No Vaults Found</div>
-                  <div style={{ color: 'var(--text-dim)', fontSize: 13, maxWidth: 400, margin: '0 auto' }}>
-                    Deploy the SuiPilot Move contracts to Sui testnet first. Then create vaults with custom strategies, fee configurations, and deposit tokens.
+                  <div style={{ color: 'var(--text-dim)', fontSize: 13, maxWidth: 400, margin: '0 auto 16px' }}>
+                    Create a vault with a strategy, deposit token, and fee structure. Your AI agent executes the strategy within guard rail constraints.
                   </div>
+                  <motion.button className="btn-neo btn-primary" style={{ padding: '12px 28px', borderRadius: 50, fontSize: 13 }}
+                    whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(245,197,24,0.25)' }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setShowVaultForm(true)}>Create Your First Vault</motion.button>
                 </GlowCard>
+                )}
               </div>
             )}
           </motion.div>
@@ -454,6 +487,12 @@ export default function Home() {
         open={showIntentForm}
         onClose={() => setShowIntentForm(false)}
         onSubmit={(intent) => setCreatedIntents(p => [...p, intent])}
+      />
+
+      <VaultForm
+        open={showVaultForm}
+        onClose={() => setShowVaultForm(false)}
+        onSubmit={(vault) => setCreatedVaults(p => [...p, vault])}
       />
 
       {/* Footer */}

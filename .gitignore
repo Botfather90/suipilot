@@ -1,3 +1,7 @@
 node_modules/
 .next/
 .env*
+dashboard/node_modules/
+dashboard/.next/
+sdk/node_modules/
+sdk/dist/

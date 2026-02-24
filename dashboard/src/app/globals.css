@@ -183,3 +183,140 @@ body {
   animation: gridPulse 4s ease-in-out infinite;
   opacity: 0.04;
 }
+
+/* ======================== MOBILE RESPONSIVE ======================== */
+
+/* Hide custom cursor on touch devices */
+@media (hover: none), (pointer: coarse) {
+  .cursor-dot, .cursor-ring { display: none !important; }
+  body { cursor: auto; }
+  .pill-nav button, .btn-neo, .neo, .interactive, select { cursor: pointer; }
+}
+
+/* Tablet (max-width: 1024px) */
+@media (max-width: 1024px) {
+  .resp-grid-4 { grid-template-columns: repeat(2, 1fr) !important; }
+  .resp-grid-3 { grid-template-columns: repeat(2, 1fr) !important; }
+  .resp-grid-2 { grid-template-columns: 1fr 1fr !important; }
+}
+
+/* Mobile (max-width: 768px) */
+@media (max-width: 768px) {
+  /* Page layout */
+  .page-container {
+    padding: 72px 16px 24px !important;
+  }
+
+  /* Pill navbar */
+  .pill-nav {
+    left: 8px; right: 8px; transform: none;
+    overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 2px; padding: 4px;
+  }
+  .pill-nav::-webkit-scrollbar { display: none; }
+  .pill-nav button {
+    font-size: 12px; padding: 8px 14px; white-space: nowrap; flex-shrink: 0;
+  }
+
+  /* Grids collapse to 1 column */
+  .resp-grid-4, .resp-grid-3, .resp-grid-2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Cards */
+  .neo { border-radius: 14px; }
+
+  /* Tables: horizontal scroll */
+  .table-wrap {
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    margin: 0 -16px; padding: 0 16px;
+  }
+  .table-wrap table { min-width: 500px; }
+
+  /* Hero text */
+  .hero-title { font-size: 36px !important; letter-spacing: -1.5px !important; }
+  .hero-subtitle { font-size: 14px !important; max-width: 320px !important; }
+
+  /* Section headers */
+  .section-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+  .section-header button { width: 100%; text-align: center; }
+
+  /* Stat cards */
+  .stat-value { font-size: 18px !important; }
+  .stat-label { font-size: 9px !important; }
+
+  /* Form modals: full-screen on mobile */
+  .modal-container {
+    align-items: flex-end !important;
+  }
+  .modal-content {
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    border-radius: 20px 20px 0 0 !important;
+    padding: 20px 16px !important;
+  }
+  .modal-grid-2 {
+    grid-template-columns: 1fr !important;
+  }
+  .modal-protocol-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Footer */
+  .page-footer {
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 12px !important;
+    text-align: center !important;
+  }
+
+  /* Feature cards on landing */
+  .feature-grid {
+    grid-template-columns: 1fr !important;
+    max-width: 100% !important;
+    margin-top: 40px !important;
+  }
+
+  /* Buttons */
+  .btn-neo { font-size: 13px; padding: 10px 18px; }
+  .btn-primary { font-size: 13px; }
+
+  /* Empty states */
+  .empty-state { padding: 32px 16px !important; }
+}
+
+/* Small mobile (max-width: 400px) */
+@media (max-width: 400px) {
+  .pill-nav { top: 8px; left: 4px; right: 4px; }
+  .pill-nav button { font-size: 11px; padding: 7px 10px; }
+  .hero-title { font-size: 28px !important; }
+  .page-container { padding: 64px 12px 20px !important; }
+}
+
+/* Docs layout responsive */
+.docs-layout {
+  flex-direction: row;
+}
+@media (max-width: 768px) {
+  .docs-layout {
+    flex-direction: column !important;
+  }
+  .docs-sidebar {
+    width: 100% !important;
+    position: static !important;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 20px;
+  }
+  .docs-sidebar button {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+  }
+}

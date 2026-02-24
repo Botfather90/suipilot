@@ -6,13 +6,15 @@ import { useCurrentAccount, useDisconnectWallet, ConnectModal, useSuiClient } fr
 import GuardRailForm from '@/components/GuardRailForm';
 import IntentForm from '@/components/IntentForm';
 import VaultForm from '@/components/VaultForm';
+import DocsPage from '@/components/DocsPage';
 
-type Tab = 'overview' | 'vaults' | 'intents' | 'guards';
+type Tab = 'overview' | 'vaults' | 'intents' | 'guards' | 'docs';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'vaults', label: 'Vaults' },
   { id: 'intents', label: 'Intents' },
   { id: 'guards', label: 'Guard Rails' },
+  { id: 'docs', label: 'Docs' },
 ];
 
 // Cursor follower
@@ -119,7 +121,7 @@ export default function Home() {
   }, [account?.address, client]);
 
   return (
-    <div style={{ minHeight: '100vh', padding: '80px 40px 40px', position: 'relative' }}>
+    <div className="page-container" style={{ minHeight: '100vh', padding: '80px 40px 40px', position: 'relative' }}>
       <Cursor />
       <div className="grid-bg" />
 
@@ -163,12 +165,12 @@ export default function Home() {
             {!account ? (
               /* Not connected state */
               <motion.div style={{ textAlign: 'center', paddingTop: 80 }} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.2 }}>
-                <motion.div
+                <motion.div className="hero-title"
                   style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-3px', marginBottom: 8, background: 'linear-gradient(135deg, var(--yellow), #fff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
                   animate={{ opacity: [0.8, 1, 0.8] }}
                   transition={{ duration: 3, repeat: Infinity }}
                 >SuiPilot</motion.div>
-                <motion.div style={{ fontSize: 18, color: 'var(--text-muted)', maxWidth: 500, margin: '0 auto 40px', lineHeight: 1.7 }}
+                <motion.div className="hero-subtitle" style={{ fontSize: 18, color: 'var(--text-muted)', maxWidth: 500, margin: '0 auto 40px', lineHeight: 1.7 }}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
                   AI DeFi Execution Protocol. Programmable guard rails. Typed intents. On-chain audit trails. Connect your wallet to begin.
                 </motion.div>
@@ -182,7 +184,7 @@ export default function Home() {
                   open={connectOpen}
                   onOpenChange={setConnectOpen}
                 />
-                <motion.div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, maxWidth: 700, margin: '60px auto 0' }}
+                <motion.div className="feature-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, maxWidth: 700, margin: '60px auto 0' }}
                   initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
                   {[
                     { title: 'Guard Rails', desc: 'Define constraints: max slippage, spending limits, protocol whitelists. Enforced at the contract level.' },
@@ -199,7 +201,7 @@ export default function Home() {
             ) : (
               /* Connected: real wallet data */
               <div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+                <div className="resp-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
                   {[
                     { label: 'WALLET', value: shortAddr(account.address), color: 'var(--yellow)' },
                     { label: 'SUI BALANCE', value: loading ? '...' : `${formatSui(balance)} SUI`, color: 'var(--yellow)' },
@@ -207,8 +209,8 @@ export default function Home() {
                     { label: 'TRANSACTIONS', value: loading ? '...' : String(txHistory.length), color: 'var(--text)' },
                   ].map((s, i) => (
                     <GlowCard key={s.label} style={{ padding: 22 }} delay={i * 0.08}>
-                      <div style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, letterSpacing: '1px', marginBottom: 10 }}>{s.label}</div>
-                      <div className="mono" style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
+                      <div className="stat-label" style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, letterSpacing: '1px', marginBottom: 10 }}>{s.label}</div>
+                      <div className="stat-value mono" style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
                     </GlowCard>
                   ))}
                 </div>
@@ -220,10 +222,11 @@ export default function Home() {
                     <span className="badge badge-yellow" style={{ animation: 'pulse 2s infinite' }}>LIVE</span>
                   </div>
                   {txHistory.length === 0 && !loading ? (
-                    <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>
+                    <div className="empty-state" style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>
                       No transactions found. Deploy SuiPilot contracts to get started.
                     </div>
                   ) : (
+                    <div className="table-wrap">
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                         {['Digest', 'Kind', 'Status', 'Gas', 'Time'].map(h => (
@@ -251,11 +254,12 @@ export default function Home() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </GlowCard>
 
                 {/* Protocol Info */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div className="resp-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <GlowCard style={{ padding: 24 }} delay={0.5}>
                     <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Protocol Status</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -319,7 +323,7 @@ export default function Home() {
               </motion.div>
             ) : (
               <div>
-                <motion.div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
+                <motion.div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                   <div>
                     <div style={{ fontSize: 24, fontWeight: 800 }}>Vaults</div>
@@ -328,7 +332,7 @@ export default function Home() {
                   <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }} onClick={() => setShowVaultForm(true)}>+ Create Vault</motion.button>
                 </motion.div>
                 {createdVaults.length > 0 ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="resp-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                     {createdVaults.map((v, i) => (
                       <GlowCard key={i} style={{ padding: 22 }} delay={i * 0.05}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -381,7 +385,7 @@ export default function Home() {
               </motion.div>
             ) : (
               <div>
-                <motion.div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
+                <motion.div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                   <div>
                     <div style={{ fontSize: 24, fontWeight: 800 }}>Intents</div>
@@ -419,7 +423,7 @@ export default function Home() {
               </motion.div>
             ) : (
               <div>
-                <motion.div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
+                <motion.div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                   <div>
                     <div style={{ fontSize: 24, fontWeight: 800 }}>Guard Rails</div>
@@ -475,6 +479,11 @@ export default function Home() {
             )}
           </motion.div>
         )}
+        {tab === 'docs' && (
+          <motion.div key="docs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <DocsPage />
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Modals */}
@@ -496,7 +505,7 @@ export default function Home() {
       />
 
       {/* Footer */}
-      <motion.div style={{ marginTop: 60, paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', paddingBottom: 20 }}
+      <motion.div className="page-footer" style={{ marginTop: 60, paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', paddingBottom: 20 }}
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}>
         <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)' }}>SuiPilot v0.1.0 // Sui Testnet</div>
         <div style={{ display: 'flex', gap: 20, fontSize: 12 }}>

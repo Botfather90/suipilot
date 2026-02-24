@@ -43,6 +43,7 @@ export default function VaultForm({ open, onClose, onSubmit }: VaultFormProps) {
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        className="modal-container"
         onClick={onClose}
       >
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }} />
@@ -50,7 +51,7 @@ export default function VaultForm({ open, onClose, onSubmit }: VaultFormProps) {
           initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
           onClick={e => e.stopPropagation()}
-          className="neo" style={{ position: 'relative', width: '100%', maxWidth: 480, padding: 28, borderRadius: 16 }}
+          className="neo modal-content" style={{ position: 'relative', width: '100%', maxWidth: 480, padding: 28, borderRadius: 16 }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
             <div>
@@ -93,7 +94,7 @@ export default function VaultForm({ open, onClose, onSubmit }: VaultFormProps) {
           </div>
 
           {/* Deposit Coin + Fee */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
+          <div className="modal-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Deposit Token</label>
               <div style={{ display: 'flex', gap: 6 }}>

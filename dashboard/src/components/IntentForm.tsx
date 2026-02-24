@@ -37,6 +37,7 @@ export default function IntentForm({ open, onClose, onSubmit }: IntentFormProps)
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        className="modal-container"
         onClick={onClose}
       >
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }} />
@@ -44,7 +45,7 @@ export default function IntentForm({ open, onClose, onSubmit }: IntentFormProps)
           initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
           onClick={e => e.stopPropagation()}
-          className="neo" style={{ position: 'relative', width: '100%', maxWidth: 440, padding: 28, borderRadius: 16 }}
+          className="neo modal-content" style={{ position: 'relative', width: '100%', maxWidth: 440, padding: 28, borderRadius: 16 }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
             <div>

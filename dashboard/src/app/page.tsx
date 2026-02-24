@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCurrentAccount, useDisconnectWallet, ConnectModal, useSuiClient } from '@mysten/dapp-kit';
+import GuardRailForm from '@/components/GuardRailForm';
+import IntentForm from '@/components/IntentForm';
 
 type Tab = 'overview' | 'vaults' | 'intents' | 'guards';
 const TABS: { id: Tab; label: string }[] = [
@@ -86,6 +88,10 @@ export default function Home() {
   const [ownedObjects, setOwnedObjects] = useState<number>(0);
   const [txHistory, setTxHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showGuardForm, setShowGuardForm] = useState(false);
+  const [showIntentForm, setShowIntentForm] = useState(false);
+  const [createdGuards, setCreatedGuards] = useState<any[]>([]);
+  const [createdIntents, setCreatedIntents] = useState<any[]>([]);
 
   // Fetch wallet data
   useEffect(() => {
@@ -348,7 +354,7 @@ export default function Home() {
                     <div style={{ fontSize: 24, fontWeight: 800 }}>Intents</div>
                     <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>Swap and liquidity intents validated against guard rails</div>
                   </div>
-                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }}>+ New Intent</motion.button>
+                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }} onClick={() => setShowIntentForm(true)}>+ New Intent</motion.button>
                 </motion.div>
                 <GlowCard style={{ padding: 48, textAlign: 'center' }}>
                   <div style={{ marginBottom: 16 }}>
@@ -386,8 +392,34 @@ export default function Home() {
                     <div style={{ fontSize: 24, fontWeight: 800 }}>Guard Rails</div>
                     <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>Define what your AI agent can and cannot do</div>
                   </div>
-                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }}>+ Create Guard Rail</motion.button>
+                  <motion.button className="btn-neo btn-primary" style={{ borderRadius: 50 }} whileTap={{ scale: 0.95 }} onClick={() => setShowGuardForm(true)}>+ Create Guard Rail</motion.button>
                 </motion.div>
+                {createdGuards.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {createdGuards.map((g, i) => (
+                      <GlowCard key={i} style={{ padding: 20 }} delay={i * 0.05}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <span style={{ fontSize: 15, fontWeight: 700 }}>{g.label || `Guard #${i + 1}`}</span>
+                          <span className="badge badge-yellow" style={{ fontSize: 10 }}>ACTIVE</span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 10 }}>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>MAX SLIPPAGE</div><div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{g.maxSlippageBps} bps</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>SPEND / EPOCH</div><div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{g.maxSpendPerEpoch} SUI</div></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 2 }}>PROTOCOLS</div><div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{g.whitelistedProtocols.length || 'All'}</div></div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {g.allowedCoinTypes.map((c: string, j: number) => (
+                            <span key={j} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 8, background: 'rgba(245,197,24,0.1)', color: 'var(--yellow)', fontWeight: 600 }}>
+                              {c.includes('SUI') ? 'SUI' : c.split('::').pop()}
+                            </span>
+                          ))}
+                        </div>
+                      </GlowCard>
+                    ))}
+                    <motion.button onClick={() => setShowGuardForm(true)} className="btn-neo" style={{ padding: 16, borderRadius: 14, fontSize: 13, width: '100%', textAlign: 'center' }}
+                      whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}>+ Add Another Guard Rail</motion.button>
+                  </div>
+                ) : (
                 <GlowCard style={{ padding: 48, textAlign: 'center' }}>
                   <div style={{ marginBottom: 16 }}>
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--yellow)" strokeWidth="1.5" style={{ opacity: 0.3 }}>
@@ -400,15 +432,29 @@ export default function Home() {
                   </div>
                   <motion.button className="btn-neo btn-primary" style={{ padding: '14px 32px', borderRadius: 50, fontSize: 14 }}
                     whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(245,197,24,0.25)' }}
-                    whileTap={{ scale: 0.95 }}>
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setShowGuardForm(true)}>
                     Create Your First Guard Rail
                   </motion.button>
                 </GlowCard>
+                )}
               </div>
             )}
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modals */}
+      <GuardRailForm
+        open={showGuardForm}
+        onClose={() => setShowGuardForm(false)}
+        onSubmit={(guard) => setCreatedGuards(p => [...p, guard])}
+      />
+      <IntentForm
+        open={showIntentForm}
+        onClose={() => setShowIntentForm(false)}
+        onSubmit={(intent) => setCreatedIntents(p => [...p, intent])}
+      />
 
       {/* Footer */}
       <motion.div style={{ marginTop: 60, paddingTop: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', paddingBottom: 20 }}

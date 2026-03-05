@@ -40,7 +40,7 @@ export default function VaultForm({ open, onClose, onSubmit }: VaultFormProps) {
   const [managementFeeBps, setManagementFeeBps] = useState('100');   // 1%
   const [error, setError] = useState('');
 
-  const handleClose = () => { reset(); handleClose(); };
+  const handleClose = () => { reset(); onClose(); };
 
   const handleSubmit = async () => {
     setError('');

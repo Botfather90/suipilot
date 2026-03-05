@@ -47,7 +47,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
     : '0';
   const minOutMist = minOut ? BigInt(Math.floor(parseFloat(minOut) * 1_000_000_000)) : 0n;
 
-  const handleClose = () => { reset(); handleClose(); };
+  const handleClose = () => { reset(); onClose(); };
 
   const handleSubmit = async () => {
     setError('');

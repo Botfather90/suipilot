@@ -44,7 +44,7 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
   const [selectedCoins, setSelectedCoins] = useState<string[]>(['SUI']);
   const [error, setError] = useState('');
 
-  const handleClose = () => { reset(); handleClose(); };
+  const handleClose = () => { reset(); onClose(); };
 
   const toggleProtocol = (id: string) =>
     setSelectedProtocols(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);

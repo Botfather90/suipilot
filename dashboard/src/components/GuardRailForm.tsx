@@ -33,7 +33,7 @@ const COIN_OPTIONS = Object.keys(COIN_TYPES);
 
 export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProps) {
   const account = useCurrentAccount();
-  const { mutateAsync: signAndExecute, isPending } = useSignAndExecuteTransaction();
+  const { mutateAsync: signAndExecute, isPending, reset } = useSignAndExecuteTransaction();
 
   const [label, setLabel] = useState('');
   const [agentAddress, setAgentAddress] = useState('');
@@ -43,6 +43,8 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
   const [selectedProtocols, setSelectedProtocols] = useState<string[]>([]);
   const [selectedCoins, setSelectedCoins] = useState<string[]>(['SUI']);
   const [error, setError] = useState('');
+
+  const handleClose = () => { reset(); handleClose(); };
 
   const toggleProtocol = (id: string) =>
     setSelectedProtocols(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
@@ -109,7 +111,7 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
 
       // Reset form
       setLabel(''); setAgentAddress(''); setSelectedProtocols([]); setSelectedCoins(['SUI']);
-      onClose();
+      handleClose();
     } catch (err: any) {
       setError(err?.message?.slice(0, 120) ?? 'Transaction failed.');
     }
@@ -125,7 +127,7 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         className="modal-container"
-        onClick={onClose}
+        onClick={handleClose}
       >
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }} />
         <motion.div
@@ -140,7 +142,7 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
               <div style={{ fontSize: 18, fontWeight: 700 }}>Create Guard Rail</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Define on-chain constraints for your AI agent</div>
             </div>
-            <motion.button onClick={onClose} whileTap={{ scale: 0.9 }}
+            <motion.button onClick={handleClose} whileTap={{ scale: 0.9 }}
               style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 18 }}>✕</motion.button>
           </div>
 
@@ -270,7 +272,7 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
           )}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <motion.button onClick={onClose} whileTap={{ scale: 0.95 }}
+            <motion.button onClick={handleClose} whileTap={{ scale: 0.95 }}
               className="btn-neo" style={{ padding: '10px 20px', borderRadius: 10, fontSize: 13, fontFamily: 'inherit' }}>
               Cancel
             </motion.button>

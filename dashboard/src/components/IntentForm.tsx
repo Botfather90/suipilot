@@ -28,7 +28,7 @@ const SLIPPAGE_PRESETS = ['0.1', '0.5', '1.0', '2.0'];
 
 export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] }: IntentFormProps) {
   const account = useCurrentAccount();
-  const { mutateAsync: signAndExecute, isPending } = useSignAndExecuteTransaction();
+  const { mutateAsync: signAndExecute, isPending, reset } = useSignAndExecuteTransaction();
 
   const [type, setType] = useState<'swap' | 'liquidity'>('swap');
   const [fromCoin, setFromCoin] = useState('SUI');
@@ -46,6 +46,8 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
     ? (parseFloat(amount) * (1 - parseFloat(slippage) / 100)).toFixed(6)
     : '0';
   const minOutMist = minOut ? BigInt(Math.floor(parseFloat(minOut) * 1_000_000_000)) : 0n;
+
+  const handleClose = () => { reset(); handleClose(); };
 
   const handleSubmit = async () => {
     setError('');
@@ -102,7 +104,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
       }, result.digest);
 
       setAmount(''); setGuardRailId(''); setPreferredProtocol('');
-      onClose();
+      handleClose();
     } catch (err: any) {
       setError(err?.message?.slice(0, 120) ?? 'Transaction failed.');
     }
@@ -116,7 +118,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         className="modal-container"
-        onClick={onClose}
+        onClick={handleClose}
       >
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }} />
         <motion.div
@@ -131,7 +133,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
               <div style={{ fontSize: 18, fontWeight: 700 }}>New Intent</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Submit a typed intent validated against your guard rail</div>
             </div>
-            <motion.button onClick={onClose} whileTap={{ scale: 0.9 }}
+            <motion.button onClick={handleClose} whileTap={{ scale: 0.9 }}
               style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 18 }}>✕</motion.button>
           </div>
 
@@ -273,7 +275,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
           )}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <motion.button onClick={onClose} whileTap={{ scale: 0.95 }}
+            <motion.button onClick={handleClose} whileTap={{ scale: 0.95 }}
               className="btn-neo" style={{ padding: '10px 20px', borderRadius: 10, fontSize: 13, fontFamily: 'inherit' }}>
               Cancel
             </motion.button>

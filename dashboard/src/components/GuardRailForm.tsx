@@ -1,11 +1,14 @@
 'use client';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { Transaction } from '@mysten/sui/transactions';
+import { PACKAGE_ID, DEPLOYED, COIN_TYPES } from '@/lib/constants';
 
 interface GuardFormProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (guard: GuardConfig) => void;
+  onSubmit: (guard: GuardConfig, txDigest: string) => void;
 }
 
 export interface GuardConfig {
@@ -14,49 +17,107 @@ export interface GuardConfig {
   whitelistedProtocols: string[];
   allowedCoinTypes: string[];
   label: string;
+  agentAddress: string;
 }
 
 const KNOWN_PROTOCOLS = [
-  { name: 'Cetus', address: '0xcetus...', description: 'Concentrated liquidity DEX' },
-  { name: 'Turbos', address: '0xturbos...', description: 'AMM DEX' },
-  { name: 'Aftermath', address: '0xafter...', description: 'Multi-asset pools' },
-  { name: 'Navi', address: '0xnavi...', description: 'Lending protocol' },
-  { name: 'Scallop', address: '0xscallop...', description: 'Money market' },
-  { name: 'Bucket', address: '0xbucket...', description: 'CDP stablecoin' },
+  { id: 'cetus',     name: 'Cetus',     description: 'Concentrated liquidity DEX' },
+  { id: 'turbos',    name: 'Turbos',    description: 'AMM DEX' },
+  { id: 'aftermath', name: 'Aftermath', description: 'Multi-asset pools' },
+  { id: 'navi',      name: 'Navi',      description: 'Lending protocol' },
+  { id: 'scallop',   name: 'Scallop',   description: 'Money market' },
+  { id: 'deepbook',  name: 'DeepBook',  description: 'Central limit order book' },
 ];
 
-const COIN_TYPES = [
-  { symbol: 'SUI', type: '0x2::sui::SUI' },
-  { symbol: 'USDC', type: '0x...::coin::USDC' },
-  { symbol: 'USDT', type: '0x...::coin::USDT' },
-  { symbol: 'wETH', type: '0x...::coin::WETH' },
-  { symbol: 'wBTC', type: '0x...::coin::WBTC' },
-];
+const COIN_OPTIONS = Object.keys(COIN_TYPES);
 
 export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProps) {
+  const account = useCurrentAccount();
+  const { mutateAsync: signAndExecute, isPending } = useSignAndExecuteTransaction();
+
   const [label, setLabel] = useState('');
-  const [maxSlippage, setMaxSlippage] = useState('50'); // basis points
-  const [maxSpend, setMaxSpend] = useState('1000'); // SUI per epoch
+  const [agentAddress, setAgentAddress] = useState('');
+  const [maxSlippage, setMaxSlippage] = useState('100');       // basis points
+  const [maxSingleTrade, setMaxSingleTrade] = useState('10');  // SUI
+  const [maxSpend, setMaxSpend] = useState('50');              // SUI per epoch
   const [selectedProtocols, setSelectedProtocols] = useState<string[]>([]);
-  const [selectedCoins, setSelectedCoins] = useState<string[]>(['0x2::sui::SUI']);
+  const [selectedCoins, setSelectedCoins] = useState<string[]>(['SUI']);
+  const [error, setError] = useState('');
 
-  const toggleProtocol = (addr: string) =>
-    setSelectedProtocols(p => p.includes(addr) ? p.filter(x => x !== addr) : [...p, addr]);
-  const toggleCoin = (type: string) =>
-    setSelectedCoins(p => p.includes(type) ? p.filter(x => x !== type) : [...p, type]);
+  const toggleProtocol = (id: string) =>
+    setSelectedProtocols(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const toggleCoin = (sym: string) =>
+    setSelectedCoins(p => p.includes(sym) ? p.filter(x => x !== sym) : [...p, sym]);
 
-  const handleSubmit = () => {
-    onSubmit({
-      label,
-      maxSlippageBps: parseInt(maxSlippage) || 50,
-      maxSpendPerEpoch: parseInt(maxSpend) || 1000,
-      whitelistedProtocols: selectedProtocols,
-      allowedCoinTypes: selectedCoins,
-    });
-    onClose();
+  const handleSubmit = async () => {
+    setError('');
+    if (!account) { setError('Connect your wallet first.'); return; }
+    if (!agentAddress || !/^0x[0-9a-fA-F]{1,64}$/.test(agentAddress)) {
+      setError('Enter a valid agent Sui address (0x...).'); return;
+    }
+    const slippageBps = parseInt(maxSlippage);
+    const singleTradeMist = BigInt(Math.floor(parseFloat(maxSingleTrade) * 1_000_000_000));
+    const spendMist = BigInt(Math.floor(parseFloat(maxSpend) * 1_000_000_000));
+
+    if (!slippageBps || slippageBps < 1 || slippageBps > 10_000) {
+      setError('Slippage must be between 1 and 10000 bps.'); return;
+    }
+    if (singleTradeMist <= 0n) { setError('Max single trade must be > 0.'); return; }
+    if (spendMist <= 0n) { setError('Max spend per epoch must be > 0.'); return; }
+
+    if (!DEPLOYED) {
+      setError('Contracts not deployed. Set NEXT_PUBLIC_PACKAGE_ID in .env.local.'); return;
+    }
+
+    try {
+      const tx = new Transaction();
+
+      const protocols = tx.makeMoveVec({
+        type: '0x1::string::String',
+        elements: selectedProtocols.map(p => tx.pure.string(p)),
+      });
+
+      const coinTypesVec = tx.makeMoveVec({
+        type: '0x1::string::String',
+        elements: selectedCoins.map(s => tx.pure.string(COIN_TYPES[s] ?? s)),
+      });
+
+      const guard = tx.moveCall({
+        target: `${PACKAGE_ID}::guard::create_guard_rail`,
+        arguments: [
+          tx.pure.u64(slippageBps),
+          tx.pure.u64(singleTradeMist),
+          tx.pure.u64(spendMist),
+          protocols,
+          coinTypesVec,
+          tx.pure.address(agentAddress),
+        ],
+      });
+
+      tx.transferObjects([guard], account.address);
+
+      const result = await signAndExecute({ transaction: tx });
+
+      onSubmit({
+        label: label || `Guard Rail ${new Date().toLocaleDateString()}`,
+        maxSlippageBps: slippageBps,
+        maxSpendPerEpoch: parseInt(maxSpend),
+        whitelistedProtocols: selectedProtocols,
+        allowedCoinTypes: selectedCoins,
+        agentAddress,
+      }, result.digest);
+
+      // Reset form
+      setLabel(''); setAgentAddress(''); setSelectedProtocols([]); setSelectedCoins(['SUI']);
+      onClose();
+    } catch (err: any) {
+      setError(err?.message?.slice(0, 120) ?? 'Transaction failed.');
+    }
   };
 
   if (!open) return null;
+
+  const slippagePct = ((parseInt(maxSlippage) || 0) / 100).toFixed(2);
 
   return (
     <AnimatePresence>
@@ -71,7 +132,8 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
           initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.2 }}
           onClick={e => e.stopPropagation()}
-          className="neo modal-content" style={{ position: 'relative', width: '100%', maxWidth: 520, maxHeight: '85vh', overflow: 'auto', padding: 28, borderRadius: 16 }}
+          className="neo modal-content"
+          style={{ position: 'relative', width: '100%', maxWidth: 540, maxHeight: '90vh', overflow: 'auto', padding: 28, borderRadius: 16 }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
             <div>
@@ -79,42 +141,64 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Define on-chain constraints for your AI agent</div>
             </div>
             <motion.button onClick={onClose} whileTap={{ scale: 0.9 }}
-              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 18 }}>x</motion.button>
+              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 18 }}>✕</motion.button>
           </div>
 
           {/* Label */}
-          <div style={{ marginBottom: 18 }}>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Guard Label</label>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Guard Label</label>
             <input value={label} onChange={e => setLabel(e.target.value)}
-              className="neo" style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, outline: 'none', fontFamily: 'inherit' }}
+              className="neo"
+              style={inputStyle}
               placeholder="e.g. Conservative DeFi Guard" />
           </div>
 
-          {/* Slippage + Spend */}
-          <div className="modal-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
+          {/* Agent Address */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Agent Address <span style={{ color: '#ef4444' }}>*</span></label>
+            <input value={agentAddress} onChange={e => setAgentAddress(e.target.value)}
+              className="neo mono"
+              style={{ ...inputStyle, fontSize: 12 }}
+              placeholder="0x... (the AI agent wallet address)" />
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>
+              This address will be authorized to trade within your constraints.
+            </div>
+          </div>
+
+          {/* Slippage + Trade + Spend */}
+          <div className="modal-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
             <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Max Slippage (bps)</label>
+              <label style={labelStyle}>Max Slippage</label>
               <div style={{ position: 'relative' }}>
                 <input value={maxSlippage} onChange={e => setMaxSlippage(e.target.value)} type="number"
-                  className="neo mono" style={{ width: '100%', padding: '10px 40px 10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, outline: 'none' }} />
-                <span className="mono" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-dim)' }}>bps</span>
+                  className="neo mono" style={{ ...inputStyle, paddingRight: 36 }} />
+                <span style={unitStyle}>bps</span>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>{maxSlippage} bps = {(parseInt(maxSlippage) / 100).toFixed(2)}%</div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>{slippagePct}%</div>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Max Spend / Epoch</label>
+              <label style={labelStyle}>Max Trade</label>
+              <div style={{ position: 'relative' }}>
+                <input value={maxSingleTrade} onChange={e => setMaxSingleTrade(e.target.value)} type="number"
+                  className="neo mono" style={{ ...inputStyle, paddingRight: 36 }} />
+                <span style={unitStyle}>SUI</span>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>per trade cap</div>
+            </div>
+            <div>
+              <label style={labelStyle}>Spend / Epoch</label>
               <div style={{ position: 'relative' }}>
                 <input value={maxSpend} onChange={e => setMaxSpend(e.target.value)} type="number"
-                  className="neo mono" style={{ width: '100%', padding: '10px 40px 10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, outline: 'none' }} />
-                <span className="mono" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-dim)' }}>SUI</span>
+                  className="neo mono" style={{ ...inputStyle, paddingRight: 36 }} />
+                <span style={unitStyle}>SUI</span>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>~24h epoch spending cap</div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>~24h cap</div>
             </div>
           </div>
 
           {/* Protocol Whitelist */}
-          <div style={{ marginBottom: 18 }}>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>
               Protocol Whitelist
               <span style={{ color: 'var(--text-dim)', fontWeight: 400, textTransform: 'none', marginLeft: 6 }}>
                 {selectedProtocols.length === 0 ? '(all allowed)' : `(${selectedProtocols.length} selected)`}
@@ -122,11 +206,12 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
             </label>
             <div className="modal-protocol-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {KNOWN_PROTOCOLS.map(p => {
-                const sel = selectedProtocols.includes(p.address);
+                const sel = selectedProtocols.includes(p.id);
                 return (
-                  <motion.button key={p.address} onClick={() => toggleProtocol(p.address)} whileTap={{ scale: 0.97 }}
+                  <motion.button key={p.id} onClick={() => toggleProtocol(p.id)} whileTap={{ scale: 0.97 }}
                     className="neo interactive" style={{
-                      padding: '10px 12px', textAlign: 'left', cursor: 'pointer', border: `1px solid ${sel ? 'var(--yellow)' : 'var(--border)'}`,
+                      padding: '9px 12px', textAlign: 'left', cursor: 'pointer',
+                      border: `1px solid ${sel ? 'var(--yellow)' : 'var(--border)'}`,
                       borderRadius: 10, background: sel ? 'rgba(245,197,24,0.06)' : 'transparent',
                     }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: sel ? 'var(--yellow)' : 'var(--text)' }}>{p.name}</div>
@@ -138,52 +223,65 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
           </div>
 
           {/* Coin Types */}
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Allowed Coin Types ({selectedCoins.length})
-            </label>
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Allowed Coins ({selectedCoins.length})</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {COIN_TYPES.map(c => {
-                const sel = selectedCoins.includes(c.type);
+              {COIN_OPTIONS.map(sym => {
+                const sel = selectedCoins.includes(sym);
                 return (
-                  <motion.button key={c.type} onClick={() => toggleCoin(c.type)} whileTap={{ scale: 0.94 }}
+                  <motion.button key={sym} onClick={() => toggleCoin(sym)} whileTap={{ scale: 0.94 }}
                     style={{
                       padding: '6px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 600,
                       border: `1px solid ${sel ? 'var(--yellow)' : 'var(--border)'}`,
                       background: sel ? 'rgba(245,197,24,0.1)' : 'transparent',
-                      color: sel ? 'var(--yellow)' : 'var(--text-muted)',
-                      fontFamily: 'inherit',
-                    }}>
-                    {c.symbol}
-                  </motion.button>
+                      color: sel ? 'var(--yellow)' : 'var(--text-muted)', fontFamily: 'inherit',
+                    }}>{sym}</motion.button>
                 );
               })}
             </div>
           </div>
 
-          {/* Summary */}
-          <div className="neo" style={{ padding: 16, borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: 20 }}>
+          {/* Tx Preview */}
+          <div className="neo" style={{ padding: 14, borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transaction Preview</div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.8 }}>
-              <div>guard::create_guard(</div>
-              <div style={{ paddingLeft: 16 }}>max_slippage: <span style={{ color: 'var(--yellow)' }}>{maxSlippage}</span>,</div>
-              <div style={{ paddingLeft: 16 }}>max_spend_per_epoch: <span style={{ color: 'var(--yellow)' }}>{maxSpend}000000000</span>,</div>
-              <div style={{ paddingLeft: 16 }}>protocols: <span style={{ color: 'var(--yellow)' }}>[{selectedProtocols.length}]</span>,</div>
-              <div style={{ paddingLeft: 16 }}>coin_types: <span style={{ color: 'var(--yellow)' }}>[{selectedCoins.length}]</span>,</div>
+              <div>guard::create_guard_rail(</div>
+              <div style={{ paddingLeft: 16 }}>max_slippage: <span style={{ color: 'var(--yellow)' }}>{maxSlippage} bps</span>,</div>
+              <div style={{ paddingLeft: 16 }}>max_single_trade: <span style={{ color: 'var(--yellow)' }}>{maxSingleTrade} SUI</span>,</div>
+              <div style={{ paddingLeft: 16 }}>epoch_limit: <span style={{ color: 'var(--yellow)' }}>{maxSpend} SUI</span>,</div>
+              <div style={{ paddingLeft: 16 }}>protocols: <span style={{ color: 'var(--yellow)' }}>[{selectedProtocols.join(', ') || 'all'}]</span>,</div>
+              <div style={{ paddingLeft: 16 }}>agent: <span style={{ color: 'var(--yellow)' }}>{agentAddress ? agentAddress.slice(0, 10) + '...' : '(not set)'}</span>,</div>
               <div>)</div>
             </div>
           </div>
 
-          {/* Actions */}
+          {/* Contract status warning */}
+          {!DEPLOYED && (
+            <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', marginBottom: 14, fontSize: 12, color: '#ef4444' }}>
+              Contracts not deployed. Deploy the Move package and set NEXT_PUBLIC_PACKAGE_ID.
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', marginBottom: 14, fontSize: 12, color: '#ef4444' }}>
+              {error}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <motion.button onClick={onClose} whileTap={{ scale: 0.95 }}
               className="btn-neo" style={{ padding: '10px 20px', borderRadius: 10, fontSize: 13, fontFamily: 'inherit' }}>
               Cancel
             </motion.button>
-            <motion.button onClick={handleSubmit} whileTap={{ scale: 0.95 }}
+            <motion.button
+              onClick={handleSubmit}
+              disabled={isPending}
+              whileTap={{ scale: isPending ? 1 : 0.95 }}
               whileHover={{ boxShadow: '0 0 20px rgba(245,197,24,0.2)' }}
-              className="btn-neo btn-primary" style={{ padding: '10px 24px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>
-              Sign & Create
+              className="btn-neo btn-primary"
+              style={{ padding: '10px 24px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: 'inherit', opacity: isPending ? 0.6 : 1, cursor: isPending ? 'wait' : 'pointer' }}>
+              {isPending ? 'Signing...' : 'Sign & Create'}
             </motion.button>
           </div>
         </motion.div>
@@ -191,3 +289,17 @@ export default function GuardRailForm({ open, onClose, onSubmit }: GuardFormProp
     </AnimatePresence>
   );
 }
+
+const labelStyle: React.CSSProperties = {
+  display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+  marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px',
+};
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '10px 14px', background: 'var(--surface)',
+  border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)',
+  fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+};
+const unitStyle: React.CSSProperties = {
+  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+  fontSize: 10, color: 'var(--text-dim)', fontFamily: 'monospace', pointerEvents: 'none',
+};

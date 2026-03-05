@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClient } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
 import { PACKAGE_ID, CONFIG_ID, DEPLOYED, COIN_TYPES } from '@/lib/constants';
 
@@ -22,12 +22,24 @@ export interface IntentConfig {
   deadline: number;
 }
 
-const COINS = Object.keys(COIN_TYPES);
+type GuardFields = {
+  maxSingleTrade: bigint;
+  maxSlippageBps: number;
+  allowedProtocols: string[];
+  epochSpendingLimit: bigint;
+  allowedCoinTypes: string[];
+};
 
+const COINS = Object.keys(COIN_TYPES);
 const SLIPPAGE_PRESETS = ['0.1', '0.5', '1.0', '2.0'];
+
+function formatSui(mist: bigint) {
+  return (Number(mist) / 1_000_000_000).toFixed(4);
+}
 
 export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] }: IntentFormProps) {
   const account = useCurrentAccount();
+  const client = useSuiClient();
   const { mutateAsync: signAndExecute, isPending, reset } = useSignAndExecuteTransaction();
 
   const [type, setType] = useState<'swap' | 'liquidity'>('swap');
@@ -40,12 +52,44 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
   const [preferredProtocol, setPreferredProtocol] = useState('');
   const [error, setError] = useState('');
 
+  const [guardFields, setGuardFields] = useState<GuardFields | null>(null);
+  const [guardFetching, setGuardFetching] = useState(false);
+
   const slippageBps = Math.round(parseFloat(slippage) * 100);
   const amountMist = amount ? BigInt(Math.floor(parseFloat(amount) * 1_000_000_000)) : 0n;
   const minOut = amount && parseFloat(amount) > 0
     ? (parseFloat(amount) * (1 - parseFloat(slippage) / 100)).toFixed(6)
     : '0';
   const minOutMist = minOut ? BigInt(Math.floor(parseFloat(minOut) * 1_000_000_000)) : 0n;
+
+  // Fetch guard fields whenever a valid guard ID is selected
+  useEffect(() => {
+    if (!guardRailId || !/^0x[0-9a-fA-F]{10,}$/.test(guardRailId)) {
+      setGuardFields(null);
+      return;
+    }
+    setGuardFetching(true);
+    setGuardFields(null);
+    client.getObject({ id: guardRailId, options: { showContent: true } })
+      .then(obj => {
+        const fields = (obj.data?.content as any)?.fields;
+        if (!fields) return;
+        setGuardFields({
+          maxSingleTrade: BigInt(fields.max_single_trade ?? 0),
+          maxSlippageBps: Number(fields.max_slippage_bps ?? 0),
+          allowedProtocols: (fields.allowed_protocols ?? []) as string[],
+          epochSpendingLimit: BigInt(fields.epoch_spending_limit ?? 0),
+          allowedCoinTypes: (fields.allowed_coin_types ?? []) as string[],
+        });
+      })
+      .catch(() => {})
+      .finally(() => setGuardFetching(false));
+  }, [guardRailId, client]);
+
+  // Reset protocol when guard changes
+  useEffect(() => {
+    setPreferredProtocol('');
+  }, [guardRailId]);
 
   const handleClose = () => { reset(); onClose(); };
 
@@ -61,10 +105,43 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
       setError('Contracts not deployed. Set NEXT_PUBLIC_PACKAGE_ID in .env.local.'); return;
     }
 
+    // Client-side guard rail validation
+    if (guardFields) {
+      if (guardFields.allowedProtocols.length === 0) {
+        setError('This guard has no protocols whitelisted — the contract will reject all intents. Create a new guard rail with at least one protocol selected.');
+        return;
+      }
+      if (!preferredProtocol) {
+        setError(`Select a protocol — your guard requires one of: ${guardFields.allowedProtocols.join(', ')}`);
+        return;
+      }
+      if (!guardFields.allowedProtocols.includes(preferredProtocol)) {
+        setError(`Protocol "${preferredProtocol}" is not in your guard's whitelist. Allowed: ${guardFields.allowedProtocols.join(', ')}`);
+        return;
+      }
+      if (amountMist > guardFields.maxSingleTrade) {
+        setError(`Amount exceeds guard's max single trade limit of ${formatSui(guardFields.maxSingleTrade)} SUI.`);
+        return;
+      }
+      if (slippageBps > guardFields.maxSlippageBps) {
+        setError(`Slippage ${slippageBps} bps exceeds guard's max of ${guardFields.maxSlippageBps} bps (${(guardFields.maxSlippageBps / 100).toFixed(2)}%).`);
+        return;
+      }
+      if (guardFields.allowedCoinTypes.length > 0) {
+        const coinType = COIN_TYPES[fromCoin] ?? fromCoin;
+        if (!guardFields.allowedCoinTypes.includes(coinType)) {
+          setError(`Coin ${fromCoin} not in guard's allowed coin types.`);
+          return;
+        }
+      }
+    } else if (!preferredProtocol) {
+      setError('Enter a preferred protocol (e.g. cetus, turbos, deepbook).');
+      return;
+    }
+
     try {
       const tx = new Transaction();
 
-      // Build Option<String> for preferred protocol
       const protocolOpt = preferredProtocol
         ? tx.moveCall({
             target: '0x1::option::some',
@@ -106,7 +183,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
       setAmount(''); setGuardRailId(''); setPreferredProtocol('');
       handleClose();
     } catch (err: any) {
-      setError(err?.message?.slice(0, 120) ?? 'Transaction failed.');
+      setError(err?.message?.slice(0, 160) ?? 'Transaction failed.');
     }
   };
 
@@ -171,6 +248,16 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
                 style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
                 placeholder="0x... (Guard Rail object ID)" />
             )}
+            {guardFetching && (
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>Fetching guard limits...</div>
+            )}
+            {guardFields && (
+              <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(245,197,24,0.06)', border: '1px solid rgba(245,197,24,0.15)', fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <span>Max trade: <span style={{ color: 'var(--yellow)', fontFamily: 'monospace' }}>{formatSui(guardFields.maxSingleTrade)} SUI</span></span>
+                <span>Max slippage: <span style={{ color: 'var(--yellow)', fontFamily: 'monospace' }}>{guardFields.maxSlippageBps} bps</span></span>
+                <span>Epoch limit: <span style={{ color: 'var(--yellow)', fontFamily: 'monospace' }}>{formatSui(guardFields.epochSpendingLimit)} SUI</span></span>
+              </div>
+            )}
           </div>
 
           {/* From */}
@@ -182,11 +269,18 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
                 style={{ padding: '10px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, outline: 'none', width: 100, cursor: 'pointer' }}>
                 {COINS.map(c => <option key={c}>{c}</option>)}
               </select>
-              <input value={amount} onChange={e => setAmount(e.target.value)} type="number" step="any"
-                className="neo mono"
-                style={{ flex: 1, padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 14, outline: 'none' }}
-                placeholder="0.0" />
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input value={amount} onChange={e => setAmount(e.target.value)} type="number" step="any"
+                  className="neo mono"
+                  style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: `1px solid ${guardFields && amountMist > guardFields.maxSingleTrade && amountMist > 0n ? 'rgba(239,68,68,0.6)' : 'var(--border)'}`, borderRadius: 10, color: 'var(--text)', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
+                  placeholder="0.0" />
+              </div>
             </div>
+            {guardFields && amountMist > 0n && amountMist > guardFields.maxSingleTrade && (
+              <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3 }}>
+                Exceeds max single trade ({formatSui(guardFields.maxSingleTrade)} SUI)
+              </div>
+            )}
           </div>
 
           {/* Swap arrow */}
@@ -217,28 +311,63 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
 
           {/* Slippage */}
           <div style={{ marginBottom: 16 }}>
-            <label style={labelStyle}>Slippage Tolerance</label>
+            <label style={labelStyle}>
+              Slippage Tolerance
+              {guardFields && (
+                <span style={{ color: 'var(--text-dim)', fontWeight: 400, textTransform: 'none', marginLeft: 6 }}>
+                  (guard max: {guardFields.maxSlippageBps} bps)
+                </span>
+              )}
+            </label>
             <div style={{ display: 'flex', gap: 6 }}>
-              {SLIPPAGE_PRESETS.map(s => (
-                <motion.button key={s} onClick={() => setSlippage(s)} whileTap={{ scale: 0.94 }}
-                  className="mono"
-                  style={{
-                    padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    border: `1px solid ${slippage === s ? 'var(--yellow)' : 'var(--border)'}`,
-                    background: slippage === s ? 'rgba(245,197,24,0.1)' : 'transparent',
-                    color: slippage === s ? 'var(--yellow)' : 'var(--text-muted)', fontFamily: 'inherit',
-                  }}>{s}%</motion.button>
-              ))}
+              {SLIPPAGE_PRESETS.map(s => {
+                const bps = Math.round(parseFloat(s) * 100);
+                const overLimit = guardFields ? bps > guardFields.maxSlippageBps : false;
+                return (
+                  <motion.button key={s} onClick={() => !overLimit && setSlippage(s)} whileTap={{ scale: overLimit ? 1 : 0.94 }}
+                    className="mono"
+                    style={{
+                      padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: overLimit ? 'not-allowed' : 'pointer',
+                      border: `1px solid ${slippage === s ? 'var(--yellow)' : overLimit ? 'rgba(239,68,68,0.3)' : 'var(--border)'}`,
+                      background: slippage === s ? 'rgba(245,197,24,0.1)' : 'transparent',
+                      color: slippage === s ? 'var(--yellow)' : overLimit ? 'rgba(239,68,68,0.5)' : 'var(--text-muted)', fontFamily: 'inherit',
+                      opacity: overLimit ? 0.5 : 1,
+                    }}>{s}%</motion.button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Preferred Protocol (optional) */}
+          {/* Preferred Protocol */}
           <div style={{ marginBottom: 16 }}>
-            <label style={labelStyle}>Preferred Protocol <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>(optional)</span></label>
-            <input value={preferredProtocol} onChange={e => setPreferredProtocol(e.target.value)}
-              className="neo"
-              style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
-              placeholder="cetus, turbos, deepbook..." />
+            <label style={labelStyle}>
+              Protocol <span style={{ color: '#ef4444' }}>*</span>
+              {guardFields && guardFields.allowedProtocols.length > 0 && (
+                <span style={{ color: 'var(--text-dim)', fontWeight: 400, textTransform: 'none', marginLeft: 6 }}>
+                  (must match guard whitelist)
+                </span>
+              )}
+            </label>
+            {guardFields && guardFields.allowedProtocols.length > 0 ? (
+              <select value={preferredProtocol} onChange={e => setPreferredProtocol(e.target.value)}
+                className="neo"
+                style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: `1px solid ${!preferredProtocol ? 'rgba(239,68,68,0.4)' : 'var(--border)'}`, borderRadius: 10, color: 'var(--text)', fontSize: 13, outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+                <option value="">— select protocol —</option>
+                {guardFields.allowedProtocols.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            ) : (
+              <input value={preferredProtocol} onChange={e => setPreferredProtocol(e.target.value)}
+                className="neo"
+                style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: `1px solid ${!preferredProtocol ? 'rgba(239,68,68,0.4)' : 'var(--border)'}`, borderRadius: 10, color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                placeholder="cetus, turbos, deepbook..." />
+            )}
+            {guardFields && guardFields.allowedProtocols.length === 0 && (
+              <div style={{ fontSize: 10, color: '#ef4444', marginTop: 4 }}>
+                This guard has no protocols whitelisted — intents will be rejected. Create a new guard rail with at least one protocol.
+              </div>
+            )}
           </div>
 
           {/* Deadline */}
@@ -258,6 +387,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
               <div style={{ paddingLeft: 16 }}>from: <span style={{ color: 'var(--yellow)' }}>{fromCoin}</span>, to: <span style={{ color: 'var(--yellow)' }}>{toCoin}</span>,</div>
               <div style={{ paddingLeft: 16 }}>amount: <span style={{ color: 'var(--yellow)' }}>{amount || '0'} {fromCoin}</span>,</div>
               <div style={{ paddingLeft: 16 }}>min_out: <span style={{ color: 'var(--yellow)' }}>{minOut}</span>, slippage: <span style={{ color: 'var(--yellow)' }}>{slippageBps} bps</span>,</div>
+              <div style={{ paddingLeft: 16 }}>protocol: <span style={{ color: 'var(--yellow)' }}>{preferredProtocol || '(required)'}</span>,</div>
               <div>)</div>
             </div>
           </div>

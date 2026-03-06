@@ -506,7 +506,9 @@ export default function Home() {
                         { label: 'Network', value: 'Sui Testnet', status: true },
                         { label: 'Contracts', value: 'Deployed', status: true },
                         { label: 'Protocol Fee', value: protocolConfig ? `${protocolConfig.fee_bps} bps` : '10 bps', status: true },
-                        { label: 'Total Intents', value: protocolConfig ? String(protocolConfig.total_intents_executed) : '—', status: !!protocolConfig },
+                        { label: 'Intents Executed', value: protocolConfig ? String(protocolConfig.total_intents_executed) : '—', status: !!protocolConfig },
+                        { label: 'Your Intents', value: String(createdIntents.length), status: createdIntents.length > 0 },
+                        { label: 'Your Guard Rails', value: String(createdGuards.length), status: createdGuards.length > 0 },
                       ] : [
                         { label: 'Network', value: 'Sui Testnet', status: true },
                         { label: 'Contracts', value: 'Not Deployed', status: false },

@@ -27,6 +27,7 @@ type GuardFields = {
   maxSlippageBps: number;
   allowedProtocols: string[];
   epochSpendingLimit: bigint;
+  epochSpent: bigint;
   allowedCoinTypes: string[];
 };
 
@@ -79,6 +80,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
           maxSlippageBps: Number(fields.max_slippage_bps ?? 0),
           allowedProtocols: (fields.allowed_protocols ?? []) as string[],
           epochSpendingLimit: BigInt(fields.epoch_spending_limit ?? 0),
+          epochSpent: BigInt(fields.epoch_spent ?? 0),
           allowedCoinTypes: (fields.allowed_coin_types ?? []) as string[],
         });
       })
@@ -91,7 +93,17 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
     setPreferredProtocol('');
   }, [guardRailId]);
 
-  const handleClose = () => { reset(); onClose(); };
+  const handleClose = () => {
+    reset();
+    setAmount('');
+    setSlippage('0.5');
+    setDeadline('10');
+    setGuardRailId(guardRailIds[0]?.id ?? '');
+    setPreferredProtocol('');
+    setError('');
+    setGuardFields(null);
+    onClose();
+  };
 
   const handleSubmit = async () => {
     setError('');
@@ -121,6 +133,11 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
       }
       if (amountMist > guardFields.maxSingleTrade) {
         setError(`Amount exceeds guard's max single trade limit of ${formatSui(guardFields.maxSingleTrade)} SUI.`);
+        return;
+      }
+      if (guardFields.epochSpent + amountMist > guardFields.epochSpendingLimit) {
+        const remaining = guardFields.epochSpendingLimit - guardFields.epochSpent;
+        setError(`Epoch spending limit reached. Remaining budget this epoch: ${formatSui(remaining > 0n ? remaining : 0n)} SUI.`);
         return;
       }
       if (slippageBps > guardFields.maxSlippageBps) {
@@ -255,7 +272,12 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
               <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(245,197,24,0.06)', border: '1px solid rgba(245,197,24,0.15)', fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <span>Max trade: <span style={{ color: 'var(--yellow)', fontFamily: 'monospace' }}>{formatSui(guardFields.maxSingleTrade)} SUI</span></span>
                 <span>Max slippage: <span style={{ color: 'var(--yellow)', fontFamily: 'monospace' }}>{guardFields.maxSlippageBps} bps</span></span>
-                <span>Epoch limit: <span style={{ color: 'var(--yellow)', fontFamily: 'monospace' }}>{formatSui(guardFields.epochSpendingLimit)} SUI</span></span>
+                <span>
+                  Epoch budget:{' '}
+                  <span style={{ color: guardFields.epochSpent >= guardFields.epochSpendingLimit ? '#ef4444' : 'var(--yellow)', fontFamily: 'monospace' }}>
+                    {formatSui(guardFields.epochSpendingLimit - guardFields.epochSpent > 0n ? guardFields.epochSpendingLimit - guardFields.epochSpent : 0n)} / {formatSui(guardFields.epochSpendingLimit)} SUI
+                  </span>
+                </span>
               </div>
             )}
           </div>

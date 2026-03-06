@@ -8,7 +8,7 @@ import IntentForm, { type IntentConfig } from '@/components/IntentForm';
 import VaultForm, { type VaultConfig } from '@/components/VaultForm';
 import DocsPage from '@/components/DocsPage';
 import Toast, { type ToastData } from '@/components/Toast';
-import { PACKAGE_ID, CONFIG_ID, DEPLOYED, SUISCAN_BASE } from '@/lib/constants';
+import { PACKAGE_ID, CONFIG_ID, DEPLOYED, SUISCAN_BASE, COIN_TYPES } from '@/lib/constants';
 
 type Tab = 'overview' | 'vaults' | 'intents' | 'guards' | 'docs';
 const TABS: { id: Tab; label: string }[] = [
@@ -178,17 +178,30 @@ export default function Home() {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [account?.address, client]);
 
-  // Fetch on-chain guard rails and vaults when deployed
-  useEffect(() => {
+  // Fetch all on-chain data: guards, vaults (VaultAdminCap → Vault), intents, config
+  const fetchChainData = useCallback(async () => {
     if (!account?.address || !DEPLOYED) return;
 
-    // Fetch owned GuardRail objects
-    client.getOwnedObjects({
-      owner: account.address,
-      filter: { StructType: `${PACKAGE_ID}::guard::GuardRail` },
-      options: { showContent: true },
-    }).then(res => {
-      const guards = res.data.map(obj => {
+    const [guardsRes, capsRes, intentsRes] = await Promise.allSettled([
+      client.getOwnedObjects({
+        owner: account.address,
+        filter: { StructType: `${PACKAGE_ID}::guard::GuardRail` },
+        options: { showContent: true },
+      }),
+      client.getOwnedObjects({
+        owner: account.address,
+        filter: { StructType: `${PACKAGE_ID}::vault::VaultAdminCap` },
+        options: { showContent: true, showType: true },
+      }),
+      client.getOwnedObjects({
+        owner: account.address,
+        filter: { StructType: `${PACKAGE_ID}::intent::SwapIntent` },
+        options: { showContent: true },
+      }),
+    ]);
+
+    if (guardsRes.status === 'fulfilled') {
+      const guards = guardsRes.value.data.map(obj => {
         const fields = (obj.data?.content as any)?.fields ?? {};
         return {
           id: obj.data?.objectId ?? '',
@@ -200,37 +213,75 @@ export default function Home() {
           active: Boolean(fields.active),
         } satisfies ChainGuardRail;
       });
-      if (guards.length > 0) setCreatedGuards(guards);
-    }).catch(() => {});
+      setCreatedGuards(guards);
+    }
 
-    // Fetch owned VaultAdminCap objects (proxy for vaults)
-    client.getOwnedObjects({
-      owner: account.address,
-      filter: { MatchNone: [{ StructType: 'non::existent::Type' }] }, // placeholder scan
-      options: { showContent: true, showType: true },
-    }).then(res => {
-      const vaultCaps = res.data.filter(obj =>
-        (obj.data?.type ?? '').includes(`${PACKAGE_ID}::vault::VaultAdminCap`)
+    if (capsRes.status === 'fulfilled' && capsRes.value.data.length > 0) {
+      const vaultIds = capsRes.value.data
+        .map(obj => (obj.data?.content as any)?.fields?.vault_id as string | undefined)
+        .filter(Boolean) as string[];
+
+      const vaultObjs = await Promise.allSettled(
+        vaultIds.map(id => client.getObject({ id, options: { showContent: true, showType: true } }))
       );
-      if (vaultCaps.length > 0) {
-        setCreatedVaults(vaultCaps.map((obj, i) => {
-          const t = obj.data?.type ?? '';
-          const coinMatch = t.match(/<(.+)>/);
-          const coinType = coinMatch?.[1] ?? 'Unknown';
-          return {
-            id: obj.data?.objectId ?? '',
-            name: `Vault #${i + 1}`,
-            strategy: 'unknown',
-            depositCoin: coinType.split('::').pop() ?? coinType,
-            performanceFeeBps: 0,
-            managementFeeBps: 0,
-            paused: false,
-          };
-        }));
-      }
-    }).catch(() => {});
 
-    // Fetch protocol config
+      const vaults: ChainVault[] = vaultObjs
+        .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+        .map((r, i) => {
+          const fields = (r.value.data?.content as any)?.fields ?? {};
+          const strat = fields.strategy ?? {};
+          const t = r.value.data?.type ?? '';
+          const coinMatch = t.match(/<(.+)>/);
+          const coinType = coinMatch?.[1] ?? '';
+          // infer strategy name from allocation values
+          const lp = Number(strat.target_alloc_lp ?? 0);
+          const lend = Number(strat.target_alloc_lend ?? 0);
+          const idle = Number(strat.target_alloc_idle ?? 0);
+          let stratName = 'custom';
+          if (lend === 9000) stratName = 'yield';
+          else if (idle === 10000) stratName = 'dca';
+          else if (lp === 5000) stratName = 'rebalance';
+          else if (lp === 8000) stratName = 'arb';
+          // resolve coin symbol
+          let sym = coinType.split('::').pop() ?? coinType;
+          for (const [s, ct] of Object.entries(COIN_TYPES)) { if (ct === coinType) { sym = s; break; } }
+          return {
+            id: r.value.data?.objectId ?? '',
+            name: `Vault #${i + 1}`,
+            strategy: stratName,
+            depositCoin: sym,
+            performanceFeeBps: Number(fields.performance_fee_bps ?? 0),
+            managementFeeBps: Number(fields.management_fee_bps ?? 0),
+            paused: Boolean(fields.paused),
+          };
+        });
+      setCreatedVaults(vaults);
+    }
+
+    if (intentsRes.status === 'fulfilled') {
+      const STATUS_LABELS = ['PENDING', 'EXECUTED', 'FAILED', 'EXPIRED', 'CANCELLED'];
+      const intents = intentsRes.value.data.map(obj => {
+        const fields = (obj.data?.content as any)?.fields ?? {};
+        const fromFull = String(fields.coin_type_in ?? '');
+        const toFull = String(fields.coin_type_out ?? '');
+        let fromSym = fromFull.split('::').pop() ?? fromFull;
+        let toSym = toFull.split('::').pop() ?? toFull;
+        for (const [s, ct] of Object.entries(COIN_TYPES)) {
+          if (ct === fromFull) fromSym = s;
+          if (ct === toFull) toSym = s;
+        }
+        return {
+          id: obj.data?.objectId ?? '',
+          fromCoin: fromSym,
+          toCoin: toSym,
+          amount: String(Number(fields.amount_in ?? 0) / 1_000_000_000),
+          guardId: String(fields.guard_rail_id ?? ''),
+          status: STATUS_LABELS[Number(fields.status ?? 0)] ?? 'PENDING',
+        } satisfies ChainIntent;
+      });
+      setCreatedIntents(intents);
+    }
+
     if (CONFIG_ID) {
       client.getObject({ id: CONFIG_ID, options: { showContent: true } }).then(obj => {
         const fields = (obj.data?.content as any)?.fields;
@@ -239,10 +290,18 @@ export default function Home() {
     }
   }, [account?.address, client]);
 
-  // Form submit handlers
+  // Initial fetch + poll every 8 s for real-time updates
+  useEffect(() => {
+    if (!account?.address || !DEPLOYED) return;
+    fetchChainData();
+    const intervalId = setInterval(fetchChainData, 8000);
+    return () => clearInterval(intervalId);
+  }, [fetchChainData, account?.address]);
+
+  // Form submit handlers — optimistic update + deferred chain refetch
   const handleGuardSubmit = (guard: GuardConfig, txDigest: string) => {
     setCreatedGuards(prev => [...prev, {
-      id: '', // will be filled after chain fetch
+      id: '',
       label: guard.label,
       maxSlippageBps: guard.maxSlippageBps,
       maxSpendPerEpoch: guard.maxSpendPerEpoch,
@@ -252,6 +311,7 @@ export default function Home() {
       active: true,
     }]);
     addToast('success', 'Guard Rail created on-chain!', txDigest);
+    setTimeout(fetchChainData, 3000);
   };
 
   const handleVaultSubmit = (vault: VaultConfig, txDigest: string) => {
@@ -265,6 +325,7 @@ export default function Home() {
       paused: false,
     }]);
     addToast('success', 'Vault deployed on-chain!', txDigest);
+    setTimeout(fetchChainData, 3000);
   };
 
   const handleIntentSubmit = (intent: IntentConfig, txDigest: string) => {
@@ -278,6 +339,7 @@ export default function Home() {
       txDigest,
     }]);
     addToast('success', 'Intent submitted on-chain!', txDigest);
+    setTimeout(fetchChainData, 3000);
   };
 
   // Guard rail IDs for IntentForm dropdown
@@ -299,14 +361,28 @@ export default function Home() {
             transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
           >S</motion.div>
         </motion.div>
-        {TABS.map(t => (
-          <motion.button
-            key={t.id}
-            className={tab === t.id ? 'active' : ''}
-            onClick={() => setTab(t.id)}
-            whileTap={{ scale: 0.92 }}
-          >{t.label}</motion.button>
-        ))}
+        {TABS.map(t => {
+          const count = t.id === 'vaults' ? createdVaults.length
+            : t.id === 'intents' ? createdIntents.length
+            : t.id === 'guards' ? createdGuards.length
+            : 0;
+          return (
+            <motion.button
+              key={t.id}
+              className={tab === t.id ? 'active' : ''}
+              onClick={() => setTab(t.id)}
+              whileTap={{ scale: 0.92 }}
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              {t.label}
+              {count > 0 && (
+                <span style={{ background: 'var(--yellow)', color: '#000', borderRadius: 10, padding: '1px 6px', fontSize: 10, fontWeight: 800, lineHeight: 1.4 }}>
+                  {count}
+                </span>
+              )}
+            </motion.button>
+          );
+        })}
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
         {account ? (
           <motion.button onClick={() => disconnect()} whileTap={{ scale: 0.92 }} style={{ color: 'var(--yellow)', fontWeight: 600 }}>

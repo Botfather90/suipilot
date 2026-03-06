@@ -33,6 +33,7 @@ type GuardFields = {
 
 const COINS = Object.keys(COIN_TYPES);
 const SLIPPAGE_PRESETS = ['0.1', '0.5', '1.0', '2.0'];
+const KNOWN_PROTOCOLS = ['cetus', 'turbos', 'deepbook'];
 
 function formatSui(mist: bigint) {
   return (Number(mist) / 1_000_000_000).toFixed(4);
@@ -98,7 +99,7 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
     setAmount('');
     setSlippage('0.5');
     setDeadline('10');
-    setGuardRailId(guardRailIds[0]?.id ?? '');
+    setGuardRailId('');
     setPreferredProtocol('');
     setError('');
     setGuardFields(null);
@@ -250,21 +251,17 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
           {/* Guard Rail ID */}
           <div style={{ marginBottom: 16 }}>
             <label style={labelStyle}>Guard Rail ID <span style={{ color: '#ef4444' }}>*</span></label>
-            {guardRailIds.length > 0 ? (
-              <select value={guardRailId} onChange={e => setGuardRailId(e.target.value)}
-                className="neo mono"
-                style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 12, outline: 'none', cursor: 'pointer', fontFamily: 'monospace' }}>
-                <option value="">— select —</option>
-                {guardRailIds.map(g => (
-                  <option key={g.id} value={g.id}>{g.label || g.id.slice(0, 20) + '...'}</option>
-                ))}
-              </select>
-            ) : (
-              <input value={guardRailId} onChange={e => setGuardRailId(e.target.value)}
-                className="neo mono"
-                style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                placeholder="0x... (Guard Rail object ID)" />
-            )}
+            <select value={guardRailId} onChange={e => setGuardRailId(e.target.value)}
+              className="neo mono"
+              style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: `1px solid ${!guardRailId ? 'rgba(239,68,68,0.4)' : 'var(--border)'}`, borderRadius: 10, color: guardRailId ? 'var(--text)' : 'var(--text-dim)', fontSize: 12, outline: 'none', cursor: 'pointer', fontFamily: 'monospace' }}>
+              <option value="">— select guard rail —</option>
+              {guardRailIds.map(g => (
+                <option key={g.id} value={g.id}>{g.label || g.id.slice(0, 20) + '...'}</option>
+              ))}
+              {guardRailIds.length === 0 && (
+                <option value="" disabled>No guard rails — create one first</option>
+              )}
+            </select>
             {guardFetching && (
               <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>Fetching guard limits...</div>
             )}
@@ -370,21 +367,14 @@ export default function IntentForm({ open, onClose, onSubmit, guardRailIds = [] 
                 </span>
               )}
             </label>
-            {guardFields && guardFields.allowedProtocols.length > 0 ? (
-              <select value={preferredProtocol} onChange={e => setPreferredProtocol(e.target.value)}
-                className="neo"
-                style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: `1px solid ${!preferredProtocol ? 'rgba(239,68,68,0.4)' : 'var(--border)'}`, borderRadius: 10, color: 'var(--text)', fontSize: 13, outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-                <option value="">— select protocol —</option>
-                {guardFields.allowedProtocols.map(p => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            ) : (
-              <input value={preferredProtocol} onChange={e => setPreferredProtocol(e.target.value)}
-                className="neo"
-                style={{ width: '100%', padding: '10px 14px', background: 'var(--surface)', border: `1px solid ${!preferredProtocol ? 'rgba(239,68,68,0.4)' : 'var(--border)'}`, borderRadius: 10, color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
-                placeholder="cetus, turbos, deepbook..." />
-            )}
+            <select value={preferredProtocol} onChange={e => setPreferredProtocol(e.target.value)}
+              className="neo"
+              style={{ width: '100%', padding: '10px 12px', background: 'var(--surface)', border: `1px solid ${!preferredProtocol ? 'rgba(239,68,68,0.4)' : 'var(--border)'}`, borderRadius: 10, color: preferredProtocol ? 'var(--text)' : 'var(--text-dim)', fontSize: 13, outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <option value="">— select protocol —</option>
+              {(guardFields && guardFields.allowedProtocols.length > 0 ? guardFields.allowedProtocols : KNOWN_PROTOCOLS).map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
             {guardFields && guardFields.allowedProtocols.length === 0 && (
               <div style={{ fontSize: 10, color: '#ef4444', marginTop: 4 }}>
                 This guard has no protocols whitelisted — intents will be rejected. Create a new guard rail with at least one protocol.

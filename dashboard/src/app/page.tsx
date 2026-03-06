@@ -150,11 +150,12 @@ export default function Home() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Fetch wallet data
-  useEffect(() => {
-    if (!account?.address) { setBalance(0n); setOwnedObjects(0); setTxHistory([]); return; }
-    setLoading(true);
+  // Fetch all on-chain data: wallet + guards, vaults, intents, config
+  const fetchChainData = useCallback(async () => {
+    if (!account?.address) return;
 
+    // Wallet data — always fetch regardless of deployment
+    setLoading(true);
     Promise.all([
       client.getBalance({ owner: account.address }),
       client.getOwnedObjects({ owner: account.address, limit: 50 }),
@@ -176,11 +177,8 @@ export default function Home() {
         kind: tx.transaction?.data?.transaction?.kind || 'Unknown',
       })));
     }).catch(() => {}).finally(() => setLoading(false));
-  }, [account?.address, client]);
 
-  // Fetch all on-chain data: guards, vaults (VaultAdminCap → Vault), intents, config
-  const fetchChainData = useCallback(async () => {
-    if (!account?.address || !DEPLOYED) return;
+    if (!DEPLOYED) return;
 
     const [guardsRes, capsRes, intentsRes] = await Promise.allSettled([
       client.getOwnedObjects({
@@ -290,9 +288,9 @@ export default function Home() {
     }
   }, [account?.address, client]);
 
-  // Initial fetch + poll every 8 s for real-time updates
+  // Initial fetch + poll every 8 s for real-time updates (wallet always, DeFi data when deployed)
   useEffect(() => {
-    if (!account?.address || !DEPLOYED) return;
+    if (!account?.address) { setBalance(0n); setOwnedObjects(0); setTxHistory([]); return; }
     fetchChainData();
     const intervalId = setInterval(fetchChainData, 8000);
     return () => clearInterval(intervalId);
